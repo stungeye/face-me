@@ -84,6 +84,7 @@ This is a build-free static application:
 - `styles.css`
 - `app.js`
 - `core.js`
+- `lifecycle.js`
 - `manifest.webmanifest`
 - `sw.js`
 - `icons/`

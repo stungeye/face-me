@@ -18,7 +18,11 @@ import {
   rotationMatrixFromY,
   smoothDirection,
   targetDetails,
-} from "./core.js?v=12";
+} from "./core.js?v=13";
+import {
+  createFaceSessionBoundary,
+  createWakeLockController,
+} from "./lifecycle.js?v=13";
 
 (() => {
 
@@ -302,10 +306,8 @@ import {
     orientationHandler: null,
     orientationAbsoluteHandler: null,
     debug: false,
-    faceActive: false,
     facing: false,
     watchId: null,
-    wakeLock: null,
     animationId: null,
     lastFrameAt: 0,
     lastUiAt: 0,
@@ -314,9 +316,16 @@ import {
     lastSensorReadingAt: 0,
     lastVibrateAt: 0,
     lastAlignmentText: "",
+    orientationFallbackTimer: null,
     sensorWarningTimer: null,
     hintTimer: null,
   };
+
+  const faceSession = createFaceSessionBoundary();
+  const wakeLock = createWakeLockController({
+    requestLock: () => navigator.wakeLock?.request?.("screen"),
+    isSessionCurrent: session => faceSession.isCurrent(session),
+  });
 
   function setMessage(message = "") {
     els.setupMessage.textContent = message;
@@ -360,7 +369,7 @@ import {
     const accuracy = Number.isFinite(state.accuracy) ? Math.round(state.accuracy) : null;
     setGpsStatus(accuracy ? `±${accuracy} m` : "ready", accuracy && accuracy <= 30 ? "good" : "neutral");
     updateTargetState();
-    if (state.faceActive) recalculateTargetVector();
+    if (faceSession.active) recalculateTargetVector();
   }
 
   function locationError(error) {
@@ -396,9 +405,11 @@ import {
     });
   }
 
-  function startLocationWatch() {
+  function startLocationWatch(session) {
     if (!navigator.geolocation || state.watchId !== null) return;
-    state.watchId = navigator.geolocation.watchPosition(updateCurrentLocation, () => {}, {
+    state.watchId = navigator.geolocation.watchPosition(position => {
+      if (faceSession.isCurrent(session)) updateCurrentLocation(position);
+    }, () => {}, {
       enableHighAccuracy: true,
       timeout: 20000,
       maximumAge: 3000,
@@ -446,7 +457,8 @@ import {
     }
   }
 
-  function onDeviceOrientation(event, source) {
+  function onDeviceOrientation(event, source, session) {
+    if (!faceSession.isCurrent(session)) return;
     if (![event.alpha, event.beta, event.gamma].every(Number.isFinite)) return;
     state.sensorSource = source;
     state.sensorAbsolute = Boolean(event.absolute || source === "deviceorientationabsolute");
@@ -457,7 +469,21 @@ import {
     updateDirectionFromSensorState();
   }
 
-  async function startOrientation() {
+  function clearOrientationFallbackTimer() {
+    if (state.orientationFallbackTimer !== null) {
+      clearTimeout(state.orientationFallbackTimer);
+      state.orientationFallbackTimer = null;
+    }
+  }
+
+  function stopGenericOrientationSensor() {
+    if (!state.genericSensor) return;
+    try { state.genericSensor.stop(); } catch {}
+    state.genericSensor = null;
+  }
+
+  function startOrientation(session) {
+    if (!faceSession.isCurrent(session)) return;
     stopOrientation();
     state.sensorError = "";
     state.sensorSource = "starting";
@@ -468,9 +494,11 @@ import {
         const sensor = new AbsoluteOrientationSensor({ frequency: 60, referenceFrame: "screen" });
         state.genericSensor = sensor;
         sensor.addEventListener("reading", () => {
+          if (!faceSession.isCurrent(session) || state.genericSensor !== sensor) return;
           try {
             const matrix = new Float32Array(16);
             sensor.populateMatrix(matrix);
+            clearOrientationFallbackTimer();
             state.sensorMatrix = matrix;
             state.sensorSource = "AbsoluteOrientationSensor(screen)";
             state.sensorAbsolute = true;
@@ -480,36 +508,48 @@ import {
           }
         });
         sensor.addEventListener("error", event => {
+          if (!faceSession.isCurrent(session) || state.genericSensor !== sensor) return;
           state.sensorError = `${event.error?.name || "SensorError"}: ${event.error?.message || "unavailable"}`;
-          if (state.faceActive) attachOrientationEventFallback();
+          attachOrientationEventFallback(session);
         });
         sensor.start();
-        window.setTimeout(() => {
-          if (!state.lastSensorReadingAt && state.faceActive) attachOrientationEventFallback();
+        const fallbackTimer = window.setTimeout(() => {
+          if (state.orientationFallbackTimer === fallbackTimer) {
+            state.orientationFallbackTimer = null;
+          }
+          if (faceSession.isCurrent(session) && state.genericSensor === sensor && !state.lastSensorReadingAt) {
+            attachOrientationEventFallback(session);
+          }
         }, 700);
+        state.orientationFallbackTimer = fallbackTimer;
         return;
       } catch (error) {
         state.sensorError = `${error?.name || "SensorError"}: ${error?.message || "unavailable"}`;
       }
     }
-    attachOrientationEventFallback();
+    attachOrientationEventFallback(session);
   }
 
-  function attachOrientationEventFallback() {
+  function attachOrientationEventFallback(session) {
+    if (!faceSession.isCurrent(session)) return;
+    clearOrientationFallbackTimer();
+    // The fallback is an exclusive handoff: event sources must not compete with the generic sensor.
+    stopGenericOrientationSensor();
+    state.sensorMatrix = null;
     if (state.orientationHandler || state.orientationAbsoluteHandler) return;
-    state.orientationAbsoluteHandler = event => onDeviceOrientation(event, "deviceorientationabsolute");
+    state.orientationAbsoluteHandler = event => onDeviceOrientation(event, "deviceorientationabsolute", session);
     state.orientationHandler = event => {
-      if (state.sensorSource !== "deviceorientationabsolute") onDeviceOrientation(event, "deviceorientation");
+      if (state.sensorSource !== "deviceorientationabsolute") {
+        onDeviceOrientation(event, "deviceorientation", session);
+      }
     };
     window.addEventListener("deviceorientationabsolute", state.orientationAbsoluteHandler, true);
     window.addEventListener("deviceorientation", state.orientationHandler, true);
   }
 
   function stopOrientation() {
-    if (state.genericSensor) {
-      try { state.genericSensor.stop(); } catch {}
-      state.genericSensor = null;
-    }
+    clearOrientationFallbackTimer();
+    stopGenericOrientationSensor();
     if (state.orientationAbsoluteHandler) {
       window.removeEventListener("deviceorientationabsolute", state.orientationAbsoluteHandler, true);
       state.orientationAbsoluteHandler = null;
@@ -528,18 +568,12 @@ import {
     }
   }
 
-  async function requestWakeLock() {
-    if (!state.faceActive || !navigator.wakeLock?.request) return;
-    try {
-      state.wakeLock = await navigator.wakeLock.request("screen");
-      state.wakeLock.addEventListener("release", () => { state.wakeLock = null; }, { once: true });
-    } catch {}
+  function requestWakeLock(session) {
+    return wakeLock.acquire(session);
   }
 
-  async function releaseWakeLock() {
-    if (!state.wakeLock) return;
-    try { await state.wakeLock.release(); } catch {}
-    state.wakeLock = null;
+  function releaseWakeLock() {
+    return wakeLock.release();
   }
 
   function shareUrlForCurrentLocation() {
@@ -582,7 +616,7 @@ import {
   }
 
   function updateDebugPanel(now) {
-    if (!state.debug || !state.faceActive || now - state.lastDebugAt < 240) return;
+    if (!state.debug || !faceSession.active || now - state.lastDebugAt < 240) return;
     state.lastDebugAt = now;
     const enu = state.targetUnitEnu || [NaN, NaN, NaN];
     const local = state.rawLocalDirection || [NaN, NaN, NaN];
@@ -619,7 +653,7 @@ import {
   }
 
   function frame(now) {
-    if (!state.faceActive) {
+    if (!faceSession.active) {
       state.animationId = null;
       return;
     }
@@ -653,14 +687,67 @@ import {
     state.lastFrameAt = 0;
   }
 
-  function scheduleSensorWarning() {
+  function clearFaceSessionTimers() {
+    clearOrientationFallbackTimer();
+    clearTimeout(state.sensorWarningTimer);
+    clearTimeout(state.hintTimer);
+    state.sensorWarningTimer = null;
+    state.hintTimer = null;
+  }
+
+  function resetFaceSessionTelemetry() {
+    state.facing = false;
+    state.rawLocalDirection = null;
+    state.displayDirection = [0, 1, 0];
+    state.sensorSource = "starting";
+    state.sensorAbsolute = false;
+    state.sensorError = "";
+    state.alpha = null;
+    state.beta = null;
+    state.gamma = null;
+    state.sensorMatrix = null;
+    state.lastAlignmentText = "";
+    state.lastSensorReadingAt = 0;
+    state.lastDebugAt = 0;
+    state.lastTapAt = 0;
+    state.lastVibrateAt = 0;
+  }
+
+  function scheduleSensorWarning(session) {
     clearTimeout(state.sensorWarningTimer);
     state.sensorWarningTimer = setTimeout(() => {
-      if (state.faceActive && !state.lastSensorReadingAt) els.sensorWarning.hidden = false;
+      state.sensorWarningTimer = null;
+      if (faceSession.isCurrent(session) && !state.lastSensorReadingAt) {
+        els.sensorWarning.hidden = false;
+      }
     }, 2600);
   }
 
+  async function requestFullscreenForSession(session) {
+    try {
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      }
+    } catch {}
+
+    // A newer active session can adopt the same global browser presentation state.
+    if (!faceSession.isCurrent(session) && !faceSession.active && document.fullscreenElement) {
+      try { await document.exitFullscreen(); } catch {}
+    }
+  }
+
+  async function lockOrientationForSession(session) {
+    try {
+      if (screen.orientation?.lock) await screen.orientation.lock("portrait");
+    } catch {}
+
+    if (!faceSession.isCurrent(session) && !faceSession.active) {
+      try { screen.orientation?.unlock?.(); } catch {}
+    }
+  }
+
   async function enterFaceMode() {
+    if (faceSession.active) return;
     state.target = parseCoordinates(els.targetInput.value);
     if (!state.current || !state.target) {
       setMessage("Set both locations first.");
@@ -669,12 +756,9 @@ import {
     if (!recalculateTargetVector()) return;
 
     setMessage("");
-    state.faceActive = true;
-    state.facing = false;
-    state.rawLocalDirection = null;
-    state.displayDirection = [0, 1, 0];
-    state.lastAlignmentText = "";
-    state.lastSensorReadingAt = 0;
+    const session = faceSession.begin();
+    clearFaceSessionTimers();
+    resetFaceSessionTelemetry();
     els.alignmentText.textContent = "acquiring direction…";
     els.alignment.classList.remove("is-close", "is-facing");
     els.faceStage.classList.remove("is-facing");
@@ -684,46 +768,43 @@ import {
     renderer?.resize?.();
 
     // Do the gesture-gated browser UI requests immediately while user activation is fresh.
-    const fullscreenPromise = (async () => {
-      try {
-        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
-          await document.documentElement.requestFullscreen({ navigationUI: "hide" });
-        }
-      } catch {}
-    })();
-    const orientationLockPromise = (async () => {
-      try { if (screen.orientation?.lock) await screen.orientation.lock("portrait"); } catch {}
-    })();
+    const fullscreenPromise = requestFullscreenForSession(session);
+    const orientationLockPromise = lockOrientationForSession(session);
 
-    startLocationWatch();
+    startLocationWatch(session);
     startAnimation();
-    scheduleSensorWarning();
-    requestWakeLock();
+    scheduleSensorWarning(session);
+    requestWakeLock(session);
 
     els.faceHint.classList.remove("fade");
     clearTimeout(state.hintTimer);
-    state.hintTimer = setTimeout(() => els.faceHint.classList.add("fade"), 4200);
+    state.hintTimer = setTimeout(() => {
+      state.hintTimer = null;
+      if (faceSession.isCurrent(session)) els.faceHint.classList.add("fade");
+    }, 4200);
 
     try {
       await requestOrientationPermission();
-      await startOrientation();
+      if (!faceSession.isCurrent(session)) return;
+      startOrientation(session);
     } catch (error) {
+      if (!faceSession.isCurrent(session)) return;
       state.sensorError = error?.message || String(error);
       state.sensorSource = "permission denied";
-      attachOrientationEventFallback();
+      attachOrientationEventFallback(session);
     }
 
     await Promise.allSettled([fullscreenPromise, orientationLockPromise]);
+    if (!faceSession.isCurrent(session)) return;
   }
 
   async function exitFaceMode() {
-    state.faceActive = false;
+    faceSession.invalidate();
     stopAnimation();
     stopOrientation();
     stopLocationWatch();
     releaseWakeLock();
-    clearTimeout(state.sensorWarningTimer);
-    clearTimeout(state.hintTimer);
+    clearFaceSessionTimers();
     els.faceStage.hidden = true;
     els.setup.hidden = false;
     state.debug = false;
@@ -811,12 +892,12 @@ import {
   });
 
   window.addEventListener("keydown", event => {
-    if (event.key === "Escape" && state.faceActive) exitFaceMode();
+    if (event.key === "Escape" && faceSession.active) exitFaceMode();
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && state.faceActive) {
-      requestWakeLock();
+    if (document.visibilityState === "visible" && faceSession.active) {
+      requestWakeLock(faceSession.generation);
     }
   });
 

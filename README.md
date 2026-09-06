@@ -49,7 +49,7 @@ python -m http.server 8080
 
 Then open `http://localhost:8080`.
 
-The pure coordinate, geometry and orientation helpers have dependency-free tests that use Node's built-in test runner:
+The pure coordinate, geometry, orientation and lifecycle helpers have dependency-free tests that use Node's built-in test runner:
 
 ```bash
 node --test
