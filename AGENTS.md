@@ -28,7 +28,7 @@ Primary test hardware/browser: Google Pixel 8 Pro, Chrome on Android.
 
 ## Geometry — preserve unless intentionally redesigning
 
-The proven geometry lives near the top of `app.js`:
+The proven geometry lives in the pure `core.js` module:
 
 1. Convert both geodetic WGS84 locations to ECEF.
 2. Subtract target ECEF - current ECEF to obtain the literal chord through 3D space.
@@ -83,6 +83,7 @@ This is a build-free static application:
 - `index.html`
 - `styles.css`
 - `app.js`
+- `core.js`
 - `manifest.webmanifest`
 - `sw.js`
 - `icons/`

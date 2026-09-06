@@ -49,6 +49,12 @@ python -m http.server 8080
 
 Then open `http://localhost:8080`.
 
+The pure coordinate, geometry and orientation helpers have dependency-free tests that use Node's built-in test runner:
+
+```bash
+node --test
+```
+
 ## Android notes
 
 - Target browser: Chrome on Android; primary test device: Pixel 8 Pro.
