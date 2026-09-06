@@ -39,7 +39,7 @@ The direction is the literal three-dimensional chord between the two WGS84 locat
 
 ## Run / deploy
 
-Geolocation and orientation sensors require a secure context. Use HTTPS for physical phone testing. Netlify works well: upload the contents of this folder, or deploy the provided Netlify ZIP with `index.html` at the ZIP root.
+Geolocation and orientation sensors require a secure context. Use HTTPS for physical phone testing. Netlify works well: deploy the contents of this folder with `index.html` at the deploy root.
 
 For desktop-only layout testing:
 
@@ -52,8 +52,18 @@ Then open `http://localhost:8080`.
 The pure coordinate, geometry, orientation and lifecycle helpers have dependency-free tests that use Node's built-in test runner:
 
 ```bash
-node --test
+npm test
 ```
+
+## Release checklist
+
+- Update the cache name in `sw.js` and the query versions for every changed cached CSS or JavaScript file in `index.html`, `app.js` and `sw.js`.
+- Run `npm test`, JavaScript syntax checks and a DOM ID/binding check.
+- Verify that the target starts blank without URL parameters and that a valid shared `?lat=...&lon=...` link fills it.
+- Enter and exit arrow mode repeatedly; confirm focus moves to the exit button and back to setup, and that animation, sensors, GPS watch and wake lock stop on exit.
+- Load once online, switch the browser offline and verify that both the app root and a valid shared URL reload.
+- Validate `manifest.webmanifest` and confirm both declared icons load.
+- On the Pixel 8 Pro over HTTPS, verify the preferred sensor and fallbacks, then physically test north, east, south, west and the antipode.
 
 ## Android notes
 

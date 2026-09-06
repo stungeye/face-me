@@ -249,6 +249,7 @@ import {
     copyLocation: document.querySelector("#copy-location"),
     copyLink: document.querySelector("#copy-link"),
     targetInput: document.querySelector("#target-input"),
+    targetError: document.querySelector("#target-error"),
     clearTarget: document.querySelector("#clear-target"),
     targetStatus: document.querySelector("#target-status"),
     targetPreview: document.querySelector("#target-preview"),
@@ -266,6 +267,7 @@ import {
     debugValues: document.querySelector("#debug-values"),
     alignment: document.querySelector("#alignment"),
     alignmentText: document.querySelector("#alignment-text"),
+    alignmentStatus: document.querySelector("#alignment-status"),
     canvas: document.querySelector("#arrow-canvas"),
   };
 
@@ -316,6 +318,8 @@ import {
     lastSensorReadingAt: 0,
     lastVibrateAt: 0,
     lastAlignmentText: "",
+    lastAlignmentStatus: "",
+    lastAlignmentStatusAt: 0,
     orientationFallbackTimer: null,
     sensorWarningTimer: null,
     hintTimer: null,
@@ -336,12 +340,18 @@ import {
     els.gpsStatus.dataset.state = status;
   }
 
+  function setTargetError(message = "") {
+    els.targetError.textContent = message;
+  }
+
   function updateTargetState() {
     const target = parseCoordinates(els.targetInput.value);
+    const hasInput = Boolean(els.targetInput.value.trim());
     state.target = target;
     els.faceButton.disabled = !(state.current && target);
-    els.targetStatus.textContent = target ? "ready" : (els.targetInput.value.trim() ? "check input" : "waiting");
-    els.targetStatus.dataset.state = target ? "good" : (els.targetInput.value.trim() ? "bad" : "neutral");
+    els.targetInput.setAttribute("aria-invalid", String(hasInput && !target));
+    els.targetStatus.textContent = target ? "ready" : (hasInput ? "check input" : "waiting");
+    els.targetStatus.dataset.state = target ? "good" : (hasInput ? "bad" : "neutral");
     updateTargetPreview();
   }
 
@@ -594,11 +604,27 @@ import {
     return true;
   }
 
+  const ALIGNMENT_STATUS_TEXT = {
+    acquiring: "Acquiring direction.",
+    off: "Target is off alignment.",
+    close: "Close to target alignment.",
+    facing: "Facing target.",
+  };
+
+  function setAccessibleAlignmentStatus(status, now, immediate = false) {
+    if (status === state.lastAlignmentStatus) return;
+    if (!immediate && now - state.lastAlignmentStatusAt < 1300) return;
+    state.lastAlignmentStatus = status;
+    state.lastAlignmentStatusAt = now;
+    els.alignmentStatus.textContent = ALIGNMENT_STATUS_TEXT[status];
+  }
+
   function updateAlignmentUi(error, now) {
     if (now - state.lastUiAt < 90) return;
     state.lastUiAt = now;
     const facing = error < 5;
     const close = error < 12;
+    setAccessibleAlignmentStatus(facing ? "facing" : (close ? "close" : "off"), now);
     const text = facing ? "FACING" : `${Math.round(error)}° OFF`;
     if (text !== state.lastAlignmentText) {
       els.alignmentText.textContent = text;
@@ -707,6 +733,8 @@ import {
     state.gamma = null;
     state.sensorMatrix = null;
     state.lastAlignmentText = "";
+    state.lastAlignmentStatus = "";
+    state.lastAlignmentStatusAt = 0;
     state.lastSensorReadingAt = 0;
     state.lastDebugAt = 0;
     state.lastTapAt = 0;
@@ -770,6 +798,8 @@ import {
     // Do the gesture-gated browser UI requests immediately while user activation is fresh.
     const fullscreenPromise = requestFullscreenForSession(session);
     const orientationLockPromise = lockOrientationForSession(session);
+    els.exitFace.focus({ preventScroll: true });
+    setAccessibleAlignmentStatus("acquiring", performance.now(), true);
 
     startLocationWatch(session);
     startAnimation();
@@ -807,11 +837,16 @@ import {
     clearFaceSessionTimers();
     els.faceStage.hidden = true;
     els.setup.hidden = false;
+    const setupFocusTarget = els.faceButton.disabled ? els.targetInput : els.faceButton;
+    setupFocusTarget.focus({ preventScroll: true });
     state.debug = false;
     els.debugPanel.hidden = true;
     els.faceStage.classList.remove("is-facing");
     els.alignment.classList.remove("is-close", "is-facing");
     els.alignmentText.textContent = "acquiring direction…";
+    els.alignmentStatus.textContent = "";
+    state.lastAlignmentStatus = "";
+    state.lastAlignmentStatusAt = 0;
     try { screen.orientation?.unlock?.(); } catch {}
     try { if (document.fullscreenElement) await document.exitFullscreen(); } catch {}
   }
@@ -860,7 +895,8 @@ import {
 
   els.targetInput.addEventListener("input", () => {
     updateTargetState();
-    setMessage(parseCoordinates(els.targetInput.value) || !els.targetInput.value.trim()
+    setMessage("");
+    setTargetError(state.target || !els.targetInput.value.trim()
       ? ""
       : "I couldn't read that. Use latitude, longitude — for example: 49.8951, -97.1384");
   });
@@ -869,6 +905,7 @@ import {
     els.targetInput.value = "";
     updateTargetState();
     setMessage("");
+    setTargetError("");
     els.targetInput.focus();
   });
 
@@ -907,7 +944,6 @@ import {
     });
   }
 
-  document.documentElement.dataset.faceMeReady = "true";
   applyTargetFromUrl();
   requestLocation();
   updateTargetState();

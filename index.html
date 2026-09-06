@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#050505" />
   <meta name="color-scheme" content="dark light" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -12,7 +12,7 @@
   <title>Face Me</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon-192.png" />
-  <link rel="stylesheet" href="./styles.css?v=13" />
+  <link rel="stylesheet" href="./styles.css?v=14" />
 </head>
 <body>
   <main id="setup" class="setup" aria-labelledby="app-title">
@@ -61,8 +61,12 @@
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
+          aria-describedby="target-hint"
+          aria-errormessage="target-error"
+          aria-invalid="false"
         ></textarea>
-        <p class="hint">Enter latitude, longitude in decimal degrees. You can paste directly into the field.</p>
+        <p id="target-hint" class="hint">Enter latitude, longitude in decimal degrees. You can paste directly into the field.</p>
+        <p id="target-error" class="message target-error" role="status" aria-live="polite"></p>
         <div class="button-row">
           <button id="clear-target" type="button" class="secondary">Clear</button>
         </div>
@@ -103,16 +107,17 @@
 
     <button id="exit-face" class="exit-button" type="button" aria-label="Return to coordinates">×</button>
 
-    <div id="face-metrics" class="face-metrics" aria-live="polite">
+    <div id="face-metrics" class="face-metrics">
       <span id="face-distance">—</span>
       <span class="metric-divider">·</span>
       <span id="face-tilt">—</span>
     </div>
 
-    <div id="alignment" class="alignment" aria-live="polite">
+    <div id="alignment" class="alignment">
       <span class="alignment-dot"></span>
       <span id="alignment-text">acquiring direction…</span>
     </div>
+    <p id="alignment-status" class="sr-only" role="status"></p>
 
     <div id="face-hint" class="face-hint">Rotate and tilt the phone until the arrow points straight toward the top edge.</div>
 
@@ -126,6 +131,6 @@
     </aside>
   </section>
 
-  <script type="module" src="./app.js?v=13"></script>
+  <script type="module" src="./app.js?v=14"></script>
 </body>
 </html>
