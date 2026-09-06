@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#050505" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="description" content="Point directly at another latitude and longitude — even through the Earth." />
+  <title>Face Me</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css?v=11" />
+</head>
+<body>
+  <main id="setup" class="setup" aria-labelledby="app-title">
+    <section class="setup-card">
+      <header class="brand">
+        <div class="brand-mark" aria-hidden="true">↑</div>
+        <div>
+          <h1 id="app-title">Face Me</h1>
+          <p>Two people. One straight line.</p>
+        </div>
+      </header>
+
+      <p class="intro">Share your coordinates, enter theirs, then use your phone to point directly at them — even when the shortest line goes through the Earth.</p>
+
+      <section class="coord-block" aria-labelledby="your-location-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">YOU</p>
+            <h2 id="your-location-heading">Your location</h2>
+          </div>
+          <span id="gps-status" class="status-pill" data-state="working">locating…</span>
+        </div>
+
+        <output id="my-coordinates" class="coordinate-output" aria-live="polite">—</output>
+        <div class="button-row button-row-wrap">
+          <button id="refresh-location" type="button" class="secondary">Refresh</button>
+          <button id="copy-location" type="button" class="secondary" disabled>Copy coords</button>
+          <button id="copy-link" type="button" class="secondary" disabled>Copy link</button>
+        </div>
+      </section>
+
+      <section class="coord-block" aria-labelledby="their-location-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">THEM</p>
+            <h2 id="their-location-heading">Their location</h2>
+          </div>
+          <span id="target-status" class="status-pill" data-state="neutral">waiting</span>
+        </div>
+
+        <label class="sr-only" for="target-input">Their latitude and longitude</label>
+        <textarea
+          id="target-input"
+          rows="2"
+          inputmode="decimal"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        ></textarea>
+        <p class="hint">Enter latitude, longitude in decimal degrees. You can paste directly into the field.</p>
+        <div class="button-row">
+          <button id="clear-target" type="button" class="secondary">Clear</button>
+        </div>
+
+        <div id="target-preview" class="target-preview" hidden>
+          <div>
+            <span class="preview-label">Direct line</span>
+            <strong id="preview-distance">—</strong>
+          </div>
+          <div>
+            <span class="preview-label">Direction</span>
+            <strong id="preview-tilt">—</strong>
+          </div>
+        </div>
+      </section>
+
+      <p id="setup-message" class="message" role="status" aria-live="polite"></p>
+      <button id="face-button" type="button" class="primary" disabled>
+        <span>FACE ME</span>
+        <span aria-hidden="true">→</span>
+      </button>
+
+      <p class="pointer-note"><strong>How to point:</strong> the <em>top edge</em> of your phone is the pointer. Hold it flat for nearby targets; tilt it downward for distant ones.</p>
+      <p class="privacy-note">Face Me has no coordinate backend or API. Shared links contain latitude and longitude in the URL, which your web host may log.</p>
+      <p class="build-version" aria-label="Build version">Face Me v1.1</p>
+    </section>
+  </main>
+
+  <section id="face-stage" class="face-stage" hidden aria-label="Face Me direction finder">
+    <canvas id="arrow-canvas" aria-hidden="true"></canvas>
+
+    <div class="edge-guide" aria-hidden="true">
+      <span>POINT THIS EDGE</span>
+      <i></i>
+    </div>
+
+    <div class="reticle" aria-hidden="true"><span></span></div>
+
+    <button id="exit-face" class="exit-button" type="button" aria-label="Return to coordinates">×</button>
+
+    <div id="face-metrics" class="face-metrics" aria-live="polite">
+      <span id="face-distance">—</span>
+      <span class="metric-divider">·</span>
+      <span id="face-tilt">—</span>
+    </div>
+
+    <div id="alignment" class="alignment" aria-live="polite">
+      <span class="alignment-dot"></span>
+      <span id="alignment-text">acquiring direction…</span>
+    </div>
+
+    <div id="face-hint" class="face-hint">Rotate and tilt the phone until the arrow points straight toward the top edge.</div>
+
+    <div id="sensor-warning" class="sensor-warning" hidden role="status">
+      Direction sensor is not responding. Try moving the phone in a figure-eight, then return and try again.
+    </div>
+
+    <aside id="debug-panel" class="debug-panel" hidden aria-label="Debug information">
+      <div class="debug-title">DEBUG · DOUBLE TAP TO HIDE</div>
+      <dl id="debug-values"></dl>
+    </aside>
+  </section>
+
+  <script defer src="./app.js?v=11"></script>
+</body>
+</html>

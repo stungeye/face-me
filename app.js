@@ -1,0 +1,1007 @@
+"use strict";
+(() => {
+  const DEG = Math.PI / 180;
+  const RAD = 180 / Math.PI;
+  const A = 6378137.0;
+  const F = 1 / 298.257223563;
+  const E2 = F * (2 - F);
+  const ALIGNMENT_AXIS = [0, 1, 0]; // top edge of the phone
+
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const normalize = v => {
+    const n = Math.hypot(v[0], v[1], v[2]);
+    return Number.isFinite(n) && n > 1e-12 ? [v[0] / n, v[1] / n, v[2] / n] : [0, 0, 0];
+  };
+
+  function geodeticToEcef(latDeg, lonDeg, altitude = 0) {
+    const lat = latDeg * DEG;
+    const lon = lonDeg * DEG;
+    const sinLat = Math.sin(lat);
+    const cosLat = Math.cos(lat);
+    const sinLon = Math.sin(lon);
+    const cosLon = Math.cos(lon);
+    const n = A / Math.sqrt(1 - E2 * sinLat * sinLat);
+    return [
+      (n + altitude) * cosLat * cosLon,
+      (n + altitude) * cosLat * sinLon,
+      (n * (1 - E2) + altitude) * sinLat,
+    ];
+  }
+
+  function ecefDeltaToEnu(delta, latDeg, lonDeg) {
+    const lat = latDeg * DEG;
+    const lon = lonDeg * DEG;
+    const sinLat = Math.sin(lat);
+    const cosLat = Math.cos(lat);
+    const sinLon = Math.sin(lon);
+    const cosLon = Math.cos(lon);
+    const [dx, dy, dz] = delta;
+    return [
+      -sinLon * dx + cosLon * dy,
+      -sinLat * cosLon * dx - sinLat * sinLon * dy + cosLat * dz,
+      cosLat * cosLon * dx + cosLat * sinLon * dy + sinLat * dz,
+    ];
+  }
+
+  function directVectorEnu(from, to) {
+    const a = geodeticToEcef(from.lat, from.lon);
+    const b = geodeticToEcef(to.lat, to.lon);
+    const delta = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const enu = ecefDeltaToEnu(delta, from.lat, from.lon);
+    return { vector: normalize(enu), enu, chordDistanceM: Math.hypot(...delta) };
+  }
+
+  function surfaceDistanceM(from, to) {
+    const phi1 = from.lat * DEG;
+    const phi2 = to.lat * DEG;
+    const dPhi = phi2 - phi1;
+    const dLambda = (to.lon - from.lon) * DEG;
+    const h = Math.sin(dPhi / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) ** 2;
+    return 6371008.8 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
+  }
+
+  function bearingDeg(v) {
+    return (Math.atan2(v[0], v[1]) * RAD + 360) % 360;
+  }
+
+  function inclinationDeg(v) {
+    const [east, north, up] = normalize(v);
+    return Math.atan2(up, Math.hypot(east, north)) * RAD;
+  }
+
+  function angleDegBetween(a, b) {
+    return Math.acos(clamp(dot(normalize(a), normalize(b)), -1, 1)) * RAD;
+  }
+
+  function parseCoordinates(text) {
+    if (!text) return null;
+    const cleaned = String(text).trim().replace(/[()\[\]]/g, " ").replace(/[°º]/g, " ");
+    const matches = cleaned.match(/[-+]?\d+(?:\.\d+)?/g);
+    if (!matches || matches.length < 2) return null;
+    const lat = Number(matches[0]);
+    const lon = Number(matches[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+    return { lat, lon };
+  }
+
+  function formatCoordinates({ lat, lon }, digits = 6) {
+    return `${lat.toFixed(digits)}, ${lon.toFixed(digits)}`;
+  }
+
+  function formatDistance(m) {
+    if (!Number.isFinite(m)) return "—";
+    if (m < 1000) return `${Math.round(m)} m`;
+    if (m < 100000) return `${(m / 1000).toFixed(1)} km`;
+    return `${Math.round(m / 1000).toLocaleString()} km`;
+  }
+
+  function formatTilt(deg) {
+    if (!Number.isFinite(deg)) return "—";
+    const abs = Math.abs(deg);
+    if (abs < 0.3) return "near horizon";
+    return `${abs.toFixed(abs < 10 ? 1 : 0)}° ${deg < 0 ? "down" : "up"}`;
+  }
+
+  function fmt(value, digits = 2) {
+    return Number.isFinite(value) ? value.toFixed(digits) : "—";
+  }
+
+  function deviceOrientationMatrix(alphaDeg, betaDeg, gammaDeg) {
+    const a = alphaDeg * DEG;
+    const b = betaDeg * DEG;
+    const g = gammaDeg * DEG;
+    const cA = Math.cos(a), sA = Math.sin(a);
+    const cB = Math.cos(b), sB = Math.sin(b);
+    const cG = Math.cos(g), sG = Math.sin(g);
+    return [
+      cA * cG - sA * sB * sG, -cB * sA, cG * sA * sB + cA * sG,
+      cG * sA + cA * sB * sG, cA * cB, sA * sG - cA * cG * sB,
+      -cB * sG, sB, cB * cG,
+    ];
+  }
+
+  function earthToLocalFromRowMajorMatrix(matrix, earth) {
+    const [x, y, z] = earth;
+    return [
+      matrix[0] * x + matrix[3] * y + matrix[6] * z,
+      matrix[1] * x + matrix[4] * y + matrix[7] * z,
+      matrix[2] * x + matrix[5] * y + matrix[8] * z,
+    ];
+  }
+
+  function earthToLocalFromSensorMatrix(matrix, earth) {
+    const [x, y, z] = earth;
+    return [
+      matrix[0] * x + matrix[1] * y + matrix[2] * z,
+      matrix[4] * x + matrix[5] * y + matrix[6] * z,
+      matrix[8] * x + matrix[9] * y + matrix[10] * z,
+    ];
+  }
+
+  function smoothDirection(current, target, dtMs, tauMs = 78) {
+    if (!current || Math.hypot(...current) < 1e-9) return normalize(target);
+    const amount = clamp(1 - Math.exp(-dtMs / tauMs), 0.02, 0.72);
+    return normalize([
+      current[0] + (target[0] - current[0]) * amount,
+      current[1] + (target[1] - current[1]) * amount,
+      current[2] + (target[2] - current[2]) * amount,
+    ]);
+  }
+
+  function rotationMatrixFromY(direction, out) {
+    const to = normalize(direction);
+    const c = clamp(to[1], -1, 1);
+    if (c > 0.999999) {
+      out.set([1,0,0, 0,1,0, 0,0,1]);
+      return out;
+    }
+    if (c < -0.999999) {
+      out.set([1,0,0, 0,-1,0, 0,0,-1]);
+      return out;
+    }
+
+    // Quaternion rotating +Y to `to`.
+    const v = cross([0, 1, 0], to);
+    let qx = v[0], qy = v[1], qz = v[2], qw = 1 + c;
+    const qn = Math.hypot(qx, qy, qz, qw);
+    qx /= qn; qy /= qn; qz /= qn; qw /= qn;
+
+    const xx = qx * qx, yy = qy * qy, zz = qz * qz;
+    const xy = qx * qy, xz = qx * qz, yz = qy * qz;
+    const wx = qw * qx, wy = qw * qy, wz = qw * qz;
+
+    // Column-major mat3 for WebGL.
+    out[0] = 1 - 2 * (yy + zz);
+    out[1] = 2 * (xy + wz);
+    out[2] = 2 * (xz - wy);
+    out[3] = 2 * (xy - wz);
+    out[4] = 1 - 2 * (xx + zz);
+    out[5] = 2 * (yz + wx);
+    out[6] = 2 * (xz + wy);
+    out[7] = 2 * (yz - wx);
+    out[8] = 1 - 2 * (xx + yy);
+    return out;
+  }
+
+  function buildArrowGeometry(segments = 18) {
+    const vertices = [];
+    const normals = [];
+    const shaftR = 0.105;
+    const shaftBottom = -0.62;
+    const shaftTop = 0.18;
+    const headR = 0.29;
+    const headBase = 0.12;
+    const tip = [0, 0.98, 0];
+
+    const addTri = (a, b, c) => {
+      const ab = [b[0]-a[0], b[1]-a[1], b[2]-a[2]];
+      const ac = [c[0]-a[0], c[1]-a[1], c[2]-a[2]];
+      const n = normalize(cross(ab, ac));
+      vertices.push(...a, ...b, ...c);
+      normals.push(...n, ...n, ...n);
+    };
+
+    for (let i = 0; i < segments; i++) {
+      const a0 = i / segments * Math.PI * 2;
+      const a1 = (i + 1) / segments * Math.PI * 2;
+      const l0 = [Math.cos(a0) * shaftR, shaftBottom, Math.sin(a0) * shaftR];
+      const l1 = [Math.cos(a1) * shaftR, shaftBottom, Math.sin(a1) * shaftR];
+      const u0 = [Math.cos(a0) * shaftR, shaftTop, Math.sin(a0) * shaftR];
+      const u1 = [Math.cos(a1) * shaftR, shaftTop, Math.sin(a1) * shaftR];
+      addTri(l0, u0, u1);
+      addTri(l0, u1, l1);
+      addTri([0, shaftBottom, 0], l1, l0);
+
+      const h0 = [Math.cos(a0) * headR, headBase, Math.sin(a0) * headR];
+      const h1 = [Math.cos(a1) * headR, headBase, Math.sin(a1) * headR];
+      addTri(h0, tip, h1);
+      addTri([0, headBase, 0], h0, h1);
+    }
+
+    return {
+      vertices: new Float32Array(vertices),
+      normals: new Float32Array(normals),
+      count: vertices.length / 3,
+    };
+  }
+
+  class WebGLArrowRenderer {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.gl = canvas.getContext("webgl", {
+        alpha: false,
+        antialias: true,
+        depth: true,
+        powerPreference: "high-performance",
+        preserveDrawingBuffer: false,
+      });
+      if (!this.gl) throw new Error("WebGL is unavailable.");
+      this.rotation = new Float32Array(9);
+      this.viewportScale = new Float32Array(2);
+      this.dpr = 1;
+      this.buildProgram();
+      this.buildGeometry();
+      this.resize = this.resize.bind(this);
+      window.addEventListener("resize", this.resize, { passive: true });
+      this.resize();
+    }
+
+    compile(type, source) {
+      const gl = this.gl;
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(shader) || "Shader compilation failed.");
+      }
+      return shader;
+    }
+
+    buildProgram() {
+      const gl = this.gl;
+      const vertex = this.compile(gl.VERTEX_SHADER, `
+        attribute vec3 aPosition;
+        attribute vec3 aNormal;
+        uniform mat3 uRotation;
+        uniform vec2 uViewportScale;
+        uniform float uFocal;
+        varying float vShade;
+        void main() {
+          vec3 p = uRotation * aPosition;
+          vec3 n = normalize(uRotation * aNormal);
+          float depth = max(0.65, 3.35 - p.z);
+          vec2 projected = vec2(p.x * uViewportScale.x, p.y * uViewportScale.y) * uFocal / depth;
+          gl_Position = vec4(projected, 0.18 + p.z * 0.035, 1.0);
+          vec3 lightDir = normalize(vec3(-0.45, 0.70, 1.0));
+          vShade = 0.30 + 0.70 * abs(dot(n, lightDir));
+        }
+      `);
+      const fragment = this.compile(gl.FRAGMENT_SHADER, `
+        precision mediump float;
+        varying float vShade;
+        uniform float uFacing;
+        void main() {
+          float base = mix(0.48, 1.0, vShade);
+          float glow = uFacing * 0.10;
+          gl_FragColor = vec4(vec3(min(1.0, base + glow)), 1.0);
+        }
+      `);
+      const program = gl.createProgram();
+      gl.attachShader(program, vertex);
+      gl.attachShader(program, fragment);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program) || "WebGL program link failed.");
+      }
+      this.program = program;
+      this.aPosition = gl.getAttribLocation(program, "aPosition");
+      this.aNormal = gl.getAttribLocation(program, "aNormal");
+      this.uRotation = gl.getUniformLocation(program, "uRotation");
+      this.uViewportScale = gl.getUniformLocation(program, "uViewportScale");
+      this.uFocal = gl.getUniformLocation(program, "uFocal");
+      this.uFacing = gl.getUniformLocation(program, "uFacing");
+    }
+
+    buildGeometry() {
+      const gl = this.gl;
+      const geometry = buildArrowGeometry();
+      this.count = geometry.count;
+      this.positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, geometry.vertices, gl.STATIC_DRAW);
+      this.normalBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, geometry.normals, gl.STATIC_DRAW);
+    }
+
+    resize() {
+      const rect = this.canvas.getBoundingClientRect();
+      // 1.5 is visibly crisp on high-density phones while avoiding millions of needless pixels/frame.
+      this.dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      const width = Math.max(1, Math.round(rect.width * this.dpr));
+      const height = Math.max(1, Math.round(rect.height * this.dpr));
+      if (this.canvas.width !== width || this.canvas.height !== height) {
+        this.canvas.width = width;
+        this.canvas.height = height;
+      }
+      const min = Math.min(width, height);
+      this.viewportScale[0] = min / width;
+      this.viewportScale[1] = min / height;
+      this.gl.viewport(0, 0, width, height);
+    }
+
+    render(direction, alignmentError) {
+      const gl = this.gl;
+      rotationMatrixFromY(direction, this.rotation);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST);
+      gl.disable(gl.BLEND);
+      gl.useProgram(this.program);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+      gl.enableVertexAttribArray(this.aPosition);
+      gl.vertexAttribPointer(this.aPosition, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+      gl.enableVertexAttribArray(this.aNormal);
+      gl.vertexAttribPointer(this.aNormal, 3, gl.FLOAT, false, 0, 0);
+
+      gl.uniformMatrix3fv(this.uRotation, false, this.rotation);
+      gl.uniform2fv(this.uViewportScale, this.viewportScale);
+      gl.uniform1f(this.uFocal, 3.02);
+      gl.uniform1f(this.uFacing, clamp(1 - alignmentError / 12, 0, 1));
+      gl.drawArrays(gl.TRIANGLES, 0, this.count);
+    }
+  }
+
+  class CanvasFallbackRenderer {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext("2d", { alpha: false });
+      if (!this.ctx) throw new Error("Canvas is unavailable.");
+      this.resize = this.resize.bind(this);
+      window.addEventListener("resize", this.resize, { passive: true });
+      this.resize();
+    }
+    resize() {
+      const r = this.canvas.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+      this.canvas.width = Math.max(1, Math.round(r.width * dpr));
+      this.canvas.height = Math.max(1, Math.round(r.height * dpr));
+    }
+    render(direction, alignmentError) {
+      const ctx = this.ctx;
+      const w = this.canvas.width, h = this.canvas.height;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, w, h);
+      const scale = Math.min(w, h) * 0.33;
+      const x = w / 2 + direction[0] * scale;
+      const y = h / 2 - direction[1] * scale;
+      const zScale = 0.75 + (direction[2] + 1) * 0.18;
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate(Math.atan2(x - w / 2, -(y - h / 2)));
+      ctx.scale(zScale, zScale);
+      ctx.fillStyle = alignmentError < 5 ? "#fff" : "#dedede";
+      const L = scale * 1.25;
+      ctx.beginPath();
+      ctx.moveTo(-L * .09, L * .45);
+      ctx.lineTo(-L * .09, -L * .25);
+      ctx.lineTo(-L * .25, -L * .25);
+      ctx.lineTo(0, -L * .55);
+      ctx.lineTo(L * .25, -L * .25);
+      ctx.lineTo(L * .09, -L * .25);
+      ctx.lineTo(L * .09, L * .45);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  const els = {
+    setup: document.querySelector("#setup"),
+    gpsStatus: document.querySelector("#gps-status"),
+    myCoordinates: document.querySelector("#my-coordinates"),
+    refreshLocation: document.querySelector("#refresh-location"),
+    copyLocation: document.querySelector("#copy-location"),
+    copyLink: document.querySelector("#copy-link"),
+    targetInput: document.querySelector("#target-input"),
+    clearTarget: document.querySelector("#clear-target"),
+    targetStatus: document.querySelector("#target-status"),
+    targetPreview: document.querySelector("#target-preview"),
+    previewDistance: document.querySelector("#preview-distance"),
+    previewTilt: document.querySelector("#preview-tilt"),
+    setupMessage: document.querySelector("#setup-message"),
+    faceButton: document.querySelector("#face-button"),
+    faceStage: document.querySelector("#face-stage"),
+    exitFace: document.querySelector("#exit-face"),
+    faceHint: document.querySelector("#face-hint"),
+    faceDistance: document.querySelector("#face-distance"),
+    faceTilt: document.querySelector("#face-tilt"),
+    sensorWarning: document.querySelector("#sensor-warning"),
+    debugPanel: document.querySelector("#debug-panel"),
+    debugValues: document.querySelector("#debug-values"),
+    alignment: document.querySelector("#alignment"),
+    alignmentText: document.querySelector("#alignment-text"),
+    canvas: document.querySelector("#arrow-canvas"),
+  };
+
+  let renderer = null;
+  let rendererError = "";
+  let rendererType = "none";
+  try {
+    renderer = new WebGLArrowRenderer(els.canvas);
+    rendererType = "WebGL";
+  } catch (error) {
+    rendererError = error?.message || String(error);
+    console.warn("Face Me WebGL renderer unavailable; using Canvas fallback.", error);
+    try {
+      renderer = new CanvasFallbackRenderer(els.canvas);
+      rendererType = "Canvas fallback";
+    } catch (fallbackError) {
+      rendererError += ` / ${fallbackError?.message || String(fallbackError)}`;
+    }
+  }
+
+  const state = {
+    current: null,
+    target: null,
+    accuracy: null,
+    targetEnu: null,
+    targetUnitEnu: null,
+    chordDistanceM: null,
+    surfaceDistanceM: null,
+    rawLocalDirection: null,
+    displayDirection: [0, 1, 0],
+    sensorSource: "waiting",
+    sensorAbsolute: false,
+    sensorError: "",
+    alpha: null,
+    beta: null,
+    gamma: null,
+    sensorMatrix: null,
+    genericSensor: null,
+    orientationHandler: null,
+    orientationAbsoluteHandler: null,
+    debug: false,
+    faceActive: false,
+    facing: false,
+    watchId: null,
+    wakeLock: null,
+    animationId: null,
+    lastFrameAt: 0,
+    lastUiAt: 0,
+    lastDebugAt: 0,
+    lastTapAt: 0,
+    lastSensorReadingAt: 0,
+    lastVibrateAt: 0,
+    lastAlignmentText: "",
+    sensorWarningTimer: null,
+    hintTimer: null,
+  };
+
+  function setMessage(message = "") {
+    els.setupMessage.textContent = message;
+  }
+
+  function setGpsStatus(text, status = "neutral") {
+    els.gpsStatus.textContent = text;
+    els.gpsStatus.dataset.state = status;
+  }
+
+  function updateTargetState() {
+    const target = parseCoordinates(els.targetInput.value);
+    state.target = target;
+    els.faceButton.disabled = !(state.current && target);
+    els.targetStatus.textContent = target ? "ready" : (els.targetInput.value.trim() ? "check input" : "waiting");
+    els.targetStatus.dataset.state = target ? "good" : (els.targetInput.value.trim() ? "bad" : "neutral");
+    updateTargetPreview();
+  }
+
+  function updateTargetPreview() {
+    if (!state.current || !state.target) {
+      els.targetPreview.hidden = true;
+      return;
+    }
+    const direct = directVectorEnu(state.current, state.target);
+    if (direct.chordDistanceM < 0.5) {
+      els.targetPreview.hidden = true;
+      return;
+    }
+    const tilt = inclinationDeg(direct.vector);
+    els.previewDistance.textContent = formatDistance(direct.chordDistanceM);
+    els.previewTilt.textContent = formatTilt(tilt);
+    els.targetPreview.hidden = false;
+  }
+
+  function updateCurrentLocation(position) {
+    state.current = { lat: position.coords.latitude, lon: position.coords.longitude };
+    state.accuracy = position.coords.accuracy;
+    els.myCoordinates.textContent = formatCoordinates(state.current);
+    els.copyLocation.disabled = false;
+    els.copyLink.disabled = false;
+    const accuracy = Number.isFinite(state.accuracy) ? Math.round(state.accuracy) : null;
+    setGpsStatus(accuracy ? `±${accuracy} m` : "ready", accuracy && accuracy <= 30 ? "good" : "neutral");
+    updateTargetState();
+    if (state.faceActive) recalculateTargetVector();
+  }
+
+  function locationError(error) {
+    const messages = {
+      1: "Location permission was denied.",
+      2: "Your location is unavailable.",
+      3: "Location timed out. Try again.",
+    };
+    setGpsStatus("location error", "bad");
+    setMessage(messages[error.code] || "Could not get your location.");
+  }
+
+  async function requestLocation() {
+    if (!navigator.geolocation) {
+      setGpsStatus("unsupported", "bad");
+      setMessage("This browser does not provide geolocation.");
+      return;
+    }
+    setGpsStatus("locating…", "working");
+    setMessage("");
+    try {
+      const permission = await navigator.permissions?.query?.({ name: "geolocation" });
+      if (permission?.state === "denied") {
+        setGpsStatus("permission denied", "bad");
+        setMessage("Location is blocked for this site. In Chrome, open site controls beside the address, allow Location, then tap Refresh.");
+        return;
+      }
+    } catch {}
+    navigator.geolocation.getCurrentPosition(updateCurrentLocation, locationError, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 30000,
+    });
+  }
+
+  function startLocationWatch() {
+    if (!navigator.geolocation || state.watchId !== null) return;
+    state.watchId = navigator.geolocation.watchPosition(updateCurrentLocation, () => {}, {
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 3000,
+    });
+  }
+
+  function stopLocationWatch() {
+    if (state.watchId !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(state.watchId);
+      state.watchId = null;
+    }
+  }
+
+  function recalculateTargetVector() {
+    if (!state.current || !state.target) return false;
+    const direct = directVectorEnu(state.current, state.target);
+    if (direct.chordDistanceM < 0.5) {
+      setMessage("Those coordinates are effectively your current location, so there is no direction to point.");
+      return false;
+    }
+    state.targetEnu = direct.enu;
+    state.targetUnitEnu = direct.vector;
+    state.chordDistanceM = direct.chordDistanceM;
+    state.surfaceDistanceM = surfaceDistanceM(state.current, state.target);
+    const tilt = inclinationDeg(state.targetUnitEnu);
+    els.faceDistance.textContent = `direct ${formatDistance(state.chordDistanceM)}`;
+    els.faceTilt.textContent = formatTilt(tilt);
+    return true;
+  }
+
+  function setRawLocalDirection(local) {
+    if (!local) return;
+    state.rawLocalDirection = normalize(local);
+    state.lastSensorReadingAt = performance.now();
+    els.sensorWarning.hidden = true;
+  }
+
+  function updateDirectionFromSensorState() {
+    if (!state.targetUnitEnu) return;
+    if (state.sensorMatrix) {
+      setRawLocalDirection(earthToLocalFromSensorMatrix(state.sensorMatrix, state.targetUnitEnu));
+      return;
+    }
+    if ([state.alpha, state.beta, state.gamma].every(Number.isFinite)) {
+      const matrix = deviceOrientationMatrix(state.alpha, state.beta, state.gamma);
+      setRawLocalDirection(earthToLocalFromRowMajorMatrix(matrix, state.targetUnitEnu));
+    }
+  }
+
+  function onDeviceOrientation(event, source) {
+    if (![event.alpha, event.beta, event.gamma].every(Number.isFinite)) return;
+    state.sensorSource = source;
+    state.sensorAbsolute = Boolean(event.absolute || source === "deviceorientationabsolute");
+    state.alpha = event.alpha;
+    state.beta = event.beta;
+    state.gamma = event.gamma;
+    state.sensorMatrix = null;
+    updateDirectionFromSensorState();
+  }
+
+  async function startOrientation() {
+    stopOrientation();
+    state.sensorError = "";
+    state.sensorSource = "starting";
+    state.lastSensorReadingAt = 0;
+
+    if ("AbsoluteOrientationSensor" in window) {
+      try {
+        const sensor = new AbsoluteOrientationSensor({ frequency: 60, referenceFrame: "screen" });
+        state.genericSensor = sensor;
+        sensor.addEventListener("reading", () => {
+          try {
+            const matrix = new Float32Array(16);
+            sensor.populateMatrix(matrix);
+            state.sensorMatrix = matrix;
+            state.sensorSource = "AbsoluteOrientationSensor(screen)";
+            state.sensorAbsolute = true;
+            updateDirectionFromSensorState();
+          } catch (error) {
+            state.sensorError = error?.message || String(error);
+          }
+        });
+        sensor.addEventListener("error", event => {
+          state.sensorError = `${event.error?.name || "SensorError"}: ${event.error?.message || "unavailable"}`;
+          if (state.faceActive) attachOrientationEventFallback();
+        });
+        sensor.start();
+        window.setTimeout(() => {
+          if (!state.lastSensorReadingAt && state.faceActive) attachOrientationEventFallback();
+        }, 700);
+        return;
+      } catch (error) {
+        state.sensorError = `${error?.name || "SensorError"}: ${error?.message || "unavailable"}`;
+      }
+    }
+    attachOrientationEventFallback();
+  }
+
+  function attachOrientationEventFallback() {
+    if (state.orientationHandler || state.orientationAbsoluteHandler) return;
+    state.orientationAbsoluteHandler = event => onDeviceOrientation(event, "deviceorientationabsolute");
+    state.orientationHandler = event => {
+      if (state.sensorSource !== "deviceorientationabsolute") onDeviceOrientation(event, "deviceorientation");
+    };
+    window.addEventListener("deviceorientationabsolute", state.orientationAbsoluteHandler, true);
+    window.addEventListener("deviceorientation", state.orientationHandler, true);
+  }
+
+  function stopOrientation() {
+    if (state.genericSensor) {
+      try { state.genericSensor.stop(); } catch {}
+      state.genericSensor = null;
+    }
+    if (state.orientationAbsoluteHandler) {
+      window.removeEventListener("deviceorientationabsolute", state.orientationAbsoluteHandler, true);
+      state.orientationAbsoluteHandler = null;
+    }
+    if (state.orientationHandler) {
+      window.removeEventListener("deviceorientation", state.orientationHandler, true);
+      state.orientationHandler = null;
+    }
+    state.sensorMatrix = null;
+  }
+
+  async function requestOrientationPermission() {
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+      const result = await DeviceOrientationEvent.requestPermission(true);
+      if (result !== "granted") throw new Error("Orientation permission was denied.");
+    }
+  }
+
+  async function requestWakeLock() {
+    if (!state.faceActive || !navigator.wakeLock?.request) return;
+    try {
+      state.wakeLock = await navigator.wakeLock.request("screen");
+      state.wakeLock.addEventListener("release", () => { state.wakeLock = null; }, { once: true });
+    } catch {}
+  }
+
+  async function releaseWakeLock() {
+    if (!state.wakeLock) return;
+    try { await state.wakeLock.release(); } catch {}
+    state.wakeLock = null;
+  }
+
+  function shareUrlForCurrentLocation() {
+    if (!state.current) return null;
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.hash = "";
+    url.searchParams.set("lat", state.current.lat.toFixed(6));
+    url.searchParams.set("lon", state.current.lon.toFixed(6));
+    return url.toString();
+  }
+
+  function applyTargetFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const lat = Number(params.get("lat"));
+    const lon = Number(params.get("lon"));
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) return false;
+    els.targetInput.value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+    updateTargetState();
+    return true;
+  }
+
+  function updateAlignmentUi(error, now) {
+    if (now - state.lastUiAt < 90) return;
+    state.lastUiAt = now;
+    const facing = error < 5;
+    const close = error < 12;
+    const text = facing ? "FACING" : `${Math.round(error)}° OFF`;
+    if (text !== state.lastAlignmentText) {
+      els.alignmentText.textContent = text;
+      state.lastAlignmentText = text;
+    }
+    els.alignment.classList.toggle("is-close", close);
+    els.alignment.classList.toggle("is-facing", facing);
+    els.faceStage.classList.toggle("is-facing", facing);
+
+    if (facing && !state.facing && now - state.lastVibrateAt > 900) {
+      state.lastVibrateAt = now;
+      try { navigator.vibrate?.(28); } catch {}
+    }
+    state.facing = facing;
+  }
+
+  function updateDebugPanel(now) {
+    if (!state.debug || !state.faceActive || now - state.lastDebugAt < 240) return;
+    state.lastDebugAt = now;
+    const enu = state.targetUnitEnu || [NaN, NaN, NaN];
+    const local = state.rawLocalDirection || [NaN, NaN, NaN];
+    const rows = [
+      ["renderer", rendererType],
+      ["sensor", state.sensorSource],
+      ["absolute", state.sensorAbsolute ? "yes" : "NO / uncertain"],
+      ["sensor age", state.lastSensorReadingAt ? `${Math.round(now - state.lastSensorReadingAt)} ms` : "—"],
+      ["sensor error", state.sensorError || rendererError || "—"],
+      ["you", state.current ? formatCoordinates(state.current) : "—"],
+      ["target", state.target ? formatCoordinates(state.target) : "—"],
+      ["GPS accuracy", Number.isFinite(state.accuracy) ? `±${Math.round(state.accuracy)} m` : "—"],
+      ["surface", formatDistance(state.surfaceDistanceM)],
+      ["direct chord", formatDistance(state.chordDistanceM)],
+      ["bearing", `${fmt(bearingDeg(enu), 1)}° true`],
+      ["chord tilt", `${fmt(inclinationDeg(enu), 1)}°`],
+      ["ENU unit", `[${fmt(enu[0], 3)}, ${fmt(enu[1], 3)}, ${fmt(enu[2], 3)}]`],
+      ["phone unit", `[${fmt(local[0], 3)}, ${fmt(local[1], 3)}, ${fmt(local[2], 3)}]`],
+      ["alignment", state.rawLocalDirection ? `${fmt(angleDegBetween(local, ALIGNMENT_AXIS), 1)}°` : "—"],
+      ["α β γ", `[${fmt(state.alpha, 1)}, ${fmt(state.beta, 1)}, ${fmt(state.gamma, 1)}]`],
+      ["screen", `${screen.orientation?.type || "unknown"} ${screen.orientation?.angle ?? 0}°`],
+      ["north note", "absolute frame may be magnetic north"],
+    ];
+
+    const fragment = document.createDocumentFragment();
+    for (const [key, value] of rows) {
+      const dt = document.createElement("dt");
+      dt.textContent = key;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      fragment.append(dt, dd);
+    }
+    els.debugValues.replaceChildren(fragment);
+  }
+
+  function frame(now) {
+    if (!state.faceActive) {
+      state.animationId = null;
+      return;
+    }
+
+    const dt = state.lastFrameAt ? Math.min(50, now - state.lastFrameAt) : 16.7;
+    state.lastFrameAt = now;
+
+    if (state.rawLocalDirection) {
+      state.displayDirection = smoothDirection(state.displayDirection, state.rawLocalDirection, dt);
+      const error = angleDegBetween(state.displayDirection, ALIGNMENT_AXIS);
+      renderer?.render(state.displayDirection, error);
+      updateAlignmentUi(error, now);
+    } else {
+      renderer?.render(state.displayDirection, 180);
+    }
+
+    updateDebugPanel(now);
+    state.animationId = requestAnimationFrame(frame);
+  }
+
+  function startAnimation() {
+    if (state.animationId !== null) return;
+    state.lastFrameAt = 0;
+    state.lastUiAt = 0;
+    state.animationId = requestAnimationFrame(frame);
+  }
+
+  function stopAnimation() {
+    if (state.animationId !== null) cancelAnimationFrame(state.animationId);
+    state.animationId = null;
+    state.lastFrameAt = 0;
+  }
+
+  function scheduleSensorWarning() {
+    clearTimeout(state.sensorWarningTimer);
+    state.sensorWarningTimer = setTimeout(() => {
+      if (state.faceActive && !state.lastSensorReadingAt) els.sensorWarning.hidden = false;
+    }, 2600);
+  }
+
+  async function enterFaceMode() {
+    state.target = parseCoordinates(els.targetInput.value);
+    if (!state.current || !state.target) {
+      setMessage("Set both locations first.");
+      return;
+    }
+    if (!recalculateTargetVector()) return;
+
+    setMessage("");
+    state.faceActive = true;
+    state.facing = false;
+    state.rawLocalDirection = null;
+    state.displayDirection = [0, 1, 0];
+    state.lastAlignmentText = "";
+    state.lastSensorReadingAt = 0;
+    els.alignmentText.textContent = "acquiring direction…";
+    els.alignment.classList.remove("is-close", "is-facing");
+    els.faceStage.classList.remove("is-facing");
+    els.sensorWarning.hidden = true;
+    els.setup.hidden = true;
+    els.faceStage.hidden = false;
+    renderer?.resize?.();
+
+    // Do the gesture-gated browser UI requests immediately while user activation is fresh.
+    const fullscreenPromise = (async () => {
+      try {
+        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+          await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+        }
+      } catch {}
+    })();
+    const orientationLockPromise = (async () => {
+      try { if (screen.orientation?.lock) await screen.orientation.lock("portrait"); } catch {}
+    })();
+
+    startLocationWatch();
+    startAnimation();
+    scheduleSensorWarning();
+    requestWakeLock();
+
+    els.faceHint.classList.remove("fade");
+    clearTimeout(state.hintTimer);
+    state.hintTimer = setTimeout(() => els.faceHint.classList.add("fade"), 4200);
+
+    try {
+      await requestOrientationPermission();
+      await startOrientation();
+    } catch (error) {
+      state.sensorError = error?.message || String(error);
+      state.sensorSource = "permission denied";
+      attachOrientationEventFallback();
+    }
+
+    await Promise.allSettled([fullscreenPromise, orientationLockPromise]);
+  }
+
+  async function exitFaceMode() {
+    state.faceActive = false;
+    stopAnimation();
+    stopOrientation();
+    stopLocationWatch();
+    releaseWakeLock();
+    clearTimeout(state.sensorWarningTimer);
+    clearTimeout(state.hintTimer);
+    els.faceStage.hidden = true;
+    els.setup.hidden = false;
+    state.debug = false;
+    els.debugPanel.hidden = true;
+    els.faceStage.classList.remove("is-facing");
+    els.alignment.classList.remove("is-close", "is-facing");
+    els.alignmentText.textContent = "acquiring direction…";
+    try { screen.orientation?.unlock?.(); } catch {}
+    try { if (document.fullscreenElement) await document.exitFullscreen(); } catch {}
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const temp = document.createElement("textarea");
+    temp.value = text;
+    temp.style.position = "fixed";
+    temp.style.opacity = "0";
+    document.body.append(temp);
+    temp.select();
+    document.execCommand("copy");
+    temp.remove();
+  }
+
+  function momentaryButtonLabel(button, text, restore, delay = 1150) {
+    button.textContent = text;
+    setTimeout(() => { button.textContent = restore; }, delay);
+  }
+
+  els.refreshLocation.addEventListener("click", requestLocation);
+  els.copyLocation.addEventListener("click", async () => {
+    if (!state.current) return;
+    try {
+      await copyText(formatCoordinates(state.current));
+      momentaryButtonLabel(els.copyLocation, "Copied", "Copy coords");
+    } catch {
+      setMessage("Could not copy automatically. Press and hold the coordinates instead.");
+    }
+  });
+
+  els.copyLink.addEventListener("click", async () => {
+    const url = shareUrlForCurrentLocation();
+    if (!url) return;
+    try {
+      await copyText(url);
+      momentaryButtonLabel(els.copyLink, "Link copied", "Copy link");
+    } catch {
+      setMessage("Could not copy the link automatically.");
+    }
+  });
+
+  els.targetInput.addEventListener("input", () => {
+    updateTargetState();
+    setMessage(parseCoordinates(els.targetInput.value) || !els.targetInput.value.trim()
+      ? ""
+      : "I couldn't read that. Use latitude, longitude — for example: 49.8951, -97.1384");
+  });
+
+  els.clearTarget.addEventListener("click", () => {
+    els.targetInput.value = "";
+    updateTargetState();
+    setMessage("");
+    els.targetInput.focus();
+  });
+
+  els.faceButton.addEventListener("click", enterFaceMode);
+  els.exitFace.addEventListener("click", event => {
+    event.stopPropagation();
+    exitFaceMode();
+  });
+
+  els.faceStage.addEventListener("pointerup", event => {
+    if (event.target === els.exitFace) return;
+    const now = performance.now();
+    if (now - state.lastTapAt < 330) {
+      state.debug = !state.debug;
+      els.debugPanel.hidden = !state.debug;
+      state.lastDebugAt = 0;
+      state.lastTapAt = 0;
+    } else {
+      state.lastTapAt = now;
+    }
+  });
+
+  window.addEventListener("keydown", event => {
+    if (event.key === "Escape" && state.faceActive) exitFaceMode();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.faceActive) {
+      requestWakeLock();
+    }
+  });
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    });
+  }
+
+  document.documentElement.dataset.faceMeReady = "true";
+  applyTargetFromUrl();
+  requestLocation();
+  updateTargetState();
+})();
