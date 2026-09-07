@@ -24,7 +24,7 @@ function worker({ offline = false, failInstall = false } = {}) {
     },
     caches: {
       open: async () => cache,
-      keys: async () => ["face-me-v19", "face-me-v20", "face-me-v21", "face-me-v22", "other-app"],
+      keys: async () => ["face-me-v19", "face-me-v20", "face-me-v21", "face-me-v22", "face-me-v23", "other-app"],
       delete: async key => deleted.push(key),
     },
     Request: class extends Request {
@@ -65,7 +65,7 @@ test("installation bypasses HTTP cache and activates only after assets succeed",
 test("activation removes only obsolete Face Me caches and claims open clients", async () => {
   const sw = worker();
   await sw.dispatch("activate");
-  assert.deepEqual(sw.deleted, ["face-me-v19", "face-me-v20", "face-me-v21"]);
+  assert.deepEqual(sw.deleted, ["face-me-v19", "face-me-v20", "face-me-v21", "face-me-v22"]);
   assert.equal(sw.claimed, true);
 });
 
