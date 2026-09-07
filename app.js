@@ -535,7 +535,7 @@ const BUILD_VERSION = "1.7";
   }
 
   function updateDirectionFromSensorState() {
-    if (!state.targetUnitEnu) return;
+    if (!state.targetUnitEnu || !state.sensorAbsolute) return;
     if (state.sensorMatrix) {
       state.localUp = earthToLocalFromSensorMatrix(state.sensorMatrix, [0, 0, 1]);
       setRawLocalDirection(earthToLocalFromSensorMatrix(state.sensorMatrix, state.targetUnitEnu));
@@ -552,11 +552,19 @@ const BUILD_VERSION = "1.7";
     if (!faceSession.isCurrent(session)) return;
     if (![event.alpha, event.beta, event.gamma].every(Number.isFinite)) return;
     state.sensorSource = source;
-    state.sensorAbsolute = Boolean(event.absolute || source === "deviceorientationabsolute");
+    state.sensorAbsolute = event.absolute === true || source === "deviceorientationabsolute";
     state.alpha = event.alpha;
     state.beta = event.beta;
     state.gamma = event.gamma;
     state.sensorMatrix = null;
+    if (!state.sensorAbsolute) {
+      // Relative angles have no north reference, so they cannot locate the target.
+      state.rawLocalDirection = null;
+      state.localUp = null;
+      state.displayTilt = null;
+      state.lastSensorReadingAt = 0;
+      return;
+    }
     updateDirectionFromSensorState();
   }
 
@@ -863,6 +871,22 @@ const BUILD_VERSION = "1.7";
       renderer?.render(state.displayDirection, error);
       updateAlignmentUi(error, now);
     } else {
+      if (now - state.lastUiAt >= 90) {
+        state.lastUiAt = now;
+        state.facing = false;
+        state.lastAlignmentText = "acquiring direction…";
+        els.alignmentText.textContent = state.lastAlignmentText;
+        els.alignment.classList.remove("is-close", "is-facing");
+        els.faceStage.classList.remove("is-facing");
+        els.tiltLevel.dataset.state = "waiting";
+        els.tiltLevel.style.setProperty("--bubble-offset", "0px");
+        els.tiltCue.textContent = "Waiting";
+        els.tiltLevel.setAttribute("aria-label", "Top edge tilt: waiting for sensor");
+        setAccessibleAlignmentStatus("acquiring", now, true);
+        if (state.sensorSource === "deviceorientation" && !state.sensorAbsolute) {
+          els.sensorWarning.hidden = false;
+        }
+      }
       renderer?.render(state.displayDirection, 180);
     }
 
