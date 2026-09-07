@@ -492,6 +492,17 @@ import {
     state.genericSensor = null;
   }
 
+  function detachOrientationEventFallback() {
+    if (state.orientationAbsoluteHandler) {
+      window.removeEventListener("deviceorientationabsolute", state.orientationAbsoluteHandler, true);
+      state.orientationAbsoluteHandler = null;
+    }
+    if (state.orientationHandler) {
+      window.removeEventListener("deviceorientation", state.orientationHandler, true);
+      state.orientationHandler = null;
+    }
+  }
+
   function startOrientation(session) {
     if (!faceSession.isCurrent(session)) return;
     stopOrientation();
@@ -509,6 +520,7 @@ import {
             const matrix = new Float32Array(16);
             sensor.populateMatrix(matrix);
             clearOrientationFallbackTimer();
+            detachOrientationEventFallback();
             state.sensorMatrix = matrix;
             state.sensorSource = "AbsoluteOrientationSensor(screen)";
             state.sensorAbsolute = true;
@@ -528,7 +540,7 @@ import {
             state.orientationFallbackTimer = null;
           }
           if (faceSession.isCurrent(session) && state.genericSensor === sensor && !state.lastSensorReadingAt) {
-            attachOrientationEventFallback(session);
+            attachOrientationEventFallback(session, { keepGenericSensor: true });
           }
         }, 700);
         state.orientationFallbackTimer = fallbackTimer;
@@ -540,11 +552,11 @@ import {
     attachOrientationEventFallback(session);
   }
 
-  function attachOrientationEventFallback(session) {
+  function attachOrientationEventFallback(session, { keepGenericSensor = false } = {}) {
     if (!faceSession.isCurrent(session)) return;
     clearOrientationFallbackTimer();
-    // The fallback is an exclusive handoff: event sources must not compete with the generic sensor.
-    stopGenericOrientationSensor();
+    // A startup fallback may bridge a slow first generic-sensor reading. Sensor errors make a full handoff.
+    if (!keepGenericSensor) stopGenericOrientationSensor();
     state.sensorMatrix = null;
     if (state.orientationHandler || state.orientationAbsoluteHandler) return;
     state.orientationAbsoluteHandler = event => onDeviceOrientation(event, "deviceorientationabsolute", session);
@@ -560,14 +572,7 @@ import {
   function stopOrientation() {
     clearOrientationFallbackTimer();
     stopGenericOrientationSensor();
-    if (state.orientationAbsoluteHandler) {
-      window.removeEventListener("deviceorientationabsolute", state.orientationAbsoluteHandler, true);
-      state.orientationAbsoluteHandler = null;
-    }
-    if (state.orientationHandler) {
-      window.removeEventListener("deviceorientation", state.orientationHandler, true);
-      state.orientationHandler = null;
-    }
+    detachOrientationEventFallback();
     state.sensorMatrix = null;
   }
 
