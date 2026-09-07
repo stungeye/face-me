@@ -15,6 +15,7 @@ import {
   rotationMatrixFromY,
   smoothDirection,
   targetDetails,
+  tiltAdjustmentDeg,
 } from "../core.js";
 
 const WINNIPEG = { lat: 49.895100, lon: -97.138400 };
@@ -193,6 +194,10 @@ test("sensor transforms known headings, pitch, and roll into phone coordinates",
         assertVectorApproximately(earthToLocalFromSensorMatrix(matrix, top), [0, 1, 0]);
         assertVectorApproximately(earthToLocalFromSensorMatrix(matrix, rolledRight), [1, 0, 0]);
         assertVectorApproximately(earthToLocalFromSensorMatrix(matrix, rolledNormal), [0, 0, 1]);
+        const localUp = earthToLocalFromSensorMatrix(matrix, [0, 0, 1]);
+        assertApproximately(tiltAdjustmentDeg([0, 1, 0], localUp), -pitch);
+        assertApproximately(tiltAdjustmentDeg(top, localUp), 0);
+        assertApproximately(tiltAdjustmentDeg([0, 0, -1], localUp), -90 - pitch);
         const belowTop = top.map((v, i) => v * Math.cos(0.15) - rolledNormal[i] * Math.sin(0.15));
         assertVectorApproximately(earthToLocalFromSensorMatrix(matrix, belowTop), [0, Math.cos(0.15), -Math.sin(0.15)]);
       }
@@ -264,4 +269,18 @@ test("surface degeneracies have no bearing while direct antipodes still point do
   const surface = targetDetails(WINNIPEG, nearbyAntipode, "surface");
   assertApproximately(Math.hypot(...surface.vector), 1);
   assert.equal(surface.vector[2], 0);
+});
+
+
+test("bubble tilt guidance stays independent of yaw and roll on the event sensor path", () => {
+  for (const yaw of [0, 45, 180, 270]) {
+    for (const roll of [-45, 0, 45]) {
+      for (const pitch of [-60, -15, 0, 30, 90]) {
+        const localUp = earthToLocalFromRowMajorMatrix(deviceOrientationMatrix(yaw, pitch, roll), [0, 0, 1]);
+        assertApproximately(tiltAdjustmentDeg([1, 0, 0], localUp), -pitch);
+        assertApproximately(tiltAdjustmentDeg([-1, 0, 0], localUp), -pitch);
+      }
+    }
+  }
+  assertApproximately(tiltAdjustmentDeg([0, 0, -1], [0, -1, 0]), 0);
 });

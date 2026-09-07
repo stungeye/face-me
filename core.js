@@ -227,3 +227,10 @@ export function targetDetails(from, to, mode = "direct") {
     tiltDeg: vector ? inclinationDeg(vector) : NaN,
   };
 }
+
+// Compare elevations independently of heading or screen roll.
+// localUp is Earth's Up vector transformed using the active sensor path.
+export function tiltAdjustmentDeg(targetEnu, localUp) {
+  const phoneElevation = Math.asin(clamp(normalize(localUp)[1], -1, 1)) * RAD;
+  return inclinationDeg(targetEnu) - phoneElevation;
+}

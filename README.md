@@ -1,4 +1,4 @@
-# Face Me — v1.6
+# Face Me — v1.7
 
 An Android-first PWA that lets two people point directly toward one another using shared latitude/longitude coordinates.
 
@@ -10,6 +10,8 @@ An Android-first PWA that lets two people point directly toward one another usin
 4. Choose **Surface** (the default) or **Through Earth**, then tap **FACE ME**.
 5. The screen becomes a black direction view with a 3D arrow.
 6. The **top edge of the phone** is the pointing vector. Rotate and tilt the phone until the arrow aligns with that edge.
+The top-right tilt bubble shows the remaining elevation adjustment independently of heading: raise the top edge for **Tilt up**, lower it for **Tilt down**, and bring the bubble to the center. **Matched** means tilt is within 3°, not that the heading is aligned. The bubble hides while waiting for sensor readings.
+
 7. Double-tap the black direction screen to show/hide debug information.
 8. During a pointing check, use **Copy checking details** in debug mode and paste the report back with the short observation fields completed.
 

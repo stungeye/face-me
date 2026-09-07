@@ -415,3 +415,33 @@ button:disabled { cursor: default; opacity: .38; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* Bubble above center means raise the top edge; below means lower it. */
+.tilt-level {
+  position: absolute;
+  z-index: 5;
+  top: max(100px, calc(env(safe-area-inset-top) + 90px));
+  right: max(10px, env(safe-area-inset-right));
+  width: 70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 4px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 18px;
+  background: rgba(0,0,0,.65);
+  color: #ddd;
+  pointer-events: none;
+}
+.tilt-title { font-size: .6rem; font-weight: 800; letter-spacing: .14em; }
+.tilt-arrow { font-size: .85rem; line-height: 20px; opacity: .65; }
+.tilt-track { position: relative; width: 24px; height: 110px; border: 1px solid #666; border-radius: 14px; background: #151515; }
+.tilt-center { position: absolute; top: 50%; left: -5px; right: -5px; height: 18px; transform: translateY(-50%); border-top: 1px solid #aaa; border-bottom: 1px solid #aaa; }
+.tilt-bubble { position: absolute; top: 50%; left: 3px; width: 16px; height: 16px; margin-top: -8px; border-radius: 50%; background: #fff; transform: translateY(var(--bubble-offset, 0px)); transition: transform 100ms linear; }
+.tilt-cue { margin-top: 3px; font-size: .62rem; font-weight: 750; white-space: nowrap; }
+.tilt-level[data-state="matched"] { color: #9eebc1; border-color: #9eebc1; }
+.tilt-level[data-state="matched"] .tilt-bubble { background: #9eebc1; box-shadow: 0 0 9px #9eebc166; }
+.tilt-level[data-state="waiting"] .tilt-bubble { opacity: 0; }
+.tilt-level[data-state="waiting"] { color: #999; }
+.face-hint { width: min(65vw, 420px); }
+@media (prefers-reduced-motion: reduce) { .tilt-bubble { transition: none; } }

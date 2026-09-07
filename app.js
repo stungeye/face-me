@@ -18,7 +18,8 @@ import {
   rotationMatrixFromY,
   smoothDirection,
   targetDetails,
-} from "./core.js?v=15";
+  tiltAdjustmentDeg,
+} from "./core.js?v=16";
 import {
   createFaceSessionBoundary,
   createWakeLockController,
@@ -28,7 +29,7 @@ import {
   famousLocationById,
 } from "./famous-locations.js?v=3";
 
-const BUILD_VERSION = "1.6";
+const BUILD_VERSION = "1.7";
 
 (() => {
 
@@ -273,6 +274,8 @@ const BUILD_VERSION = "1.6";
     exitFace: document.querySelector("#exit-face"),
     faceHint: document.querySelector("#face-hint"),
     faceDistance: document.querySelector("#face-distance"),
+    tiltLevel: document.querySelector("#tilt-level"),
+    tiltCue: document.querySelector("#tilt-cue"),
     faceTilt: document.querySelector("#face-tilt"),
     sensorWarning: document.querySelector("#sensor-warning"),
     debugPanel: document.querySelector("#debug-panel"),
@@ -534,11 +537,13 @@ const BUILD_VERSION = "1.6";
   function updateDirectionFromSensorState() {
     if (!state.targetUnitEnu) return;
     if (state.sensorMatrix) {
+      state.localUp = earthToLocalFromSensorMatrix(state.sensorMatrix, [0, 0, 1]);
       setRawLocalDirection(earthToLocalFromSensorMatrix(state.sensorMatrix, state.targetUnitEnu));
       return;
     }
     if ([state.alpha, state.beta, state.gamma].every(Number.isFinite)) {
       const matrix = deviceOrientationMatrix(state.alpha, state.beta, state.gamma);
+      state.localUp = earthToLocalFromRowMajorMatrix(matrix, [0, 0, 1]);
       setRawLocalDirection(earthToLocalFromRowMajorMatrix(matrix, state.targetUnitEnu));
     }
   }
@@ -704,6 +709,16 @@ const BUILD_VERSION = "1.6";
   function updateAlignmentUi(error, now) {
     if (now - state.lastUiAt < 90) return;
     state.lastUiAt = now;
+    const freshTilt = state.displayTilt !== null && now - state.lastSensorReadingAt < 2000;
+    const tilt = state.displayTilt;
+    const matched = freshTilt && Math.abs(tilt) < 3;
+    els.tiltLevel.dataset.state = freshTilt ? (matched ? "matched" : "adjust") : "waiting";
+    els.tiltLevel.style.setProperty("--bubble-offset", `${freshTilt && !matched ? -clamp(tilt / 45, -1, 1) * 43 : 0}px`);
+    const cue = !freshTilt ? "Waiting" : matched ? "Matched" : tilt > 0 ? "Tilt up" : "Tilt down";
+    if (els.tiltCue.textContent !== cue) {
+      els.tiltCue.textContent = cue;
+      els.tiltLevel.setAttribute("aria-label", `Top edge tilt: ${cue.toLowerCase()}`);
+    }
     const facing = error < 5;
     const close = error < 12;
     setAccessibleAlignmentStatus(facing ? "facing" : (close ? "close" : "off"), now);
@@ -839,6 +854,11 @@ const BUILD_VERSION = "1.6";
 
     if (state.rawLocalDirection) {
       state.displayDirection = smoothDirection(state.displayDirection, state.rawLocalDirection, dt);
+      if (state.localUp) {
+        const tilt = tiltAdjustmentDeg(state.targetUnitEnu, state.localUp);
+        state.displayTilt = state.displayTilt === null ? tilt
+          : state.displayTilt + (tilt - state.displayTilt) * (1 - Math.exp(-dt / 140));
+      }
       const error = angleDegBetween(state.displayDirection, ALIGNMENT_AXIS);
       renderer?.render(state.displayDirection, error);
       updateAlignmentUi(error, now);
@@ -874,6 +894,11 @@ const BUILD_VERSION = "1.6";
   function resetFaceSessionTelemetry() {
     state.facing = false;
     state.rawLocalDirection = null;
+    state.localUp = null;
+    state.displayTilt = null;
+    els.tiltLevel.dataset.state = "waiting";
+    els.tiltCue.textContent = "Waiting";
+    els.tiltLevel.setAttribute("aria-label", "Top edge tilt: waiting for sensor");
     state.displayDirection = [0, 1, 0];
     state.sensorSource = "starting";
     state.sensorAbsolute = false;
