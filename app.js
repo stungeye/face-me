@@ -18,7 +18,7 @@ import {
   rotationMatrixFromY,
   smoothDirection,
   targetDetails,
-} from "./core.js?v=13";
+} from "./core.js?v=14";
 import {
   createFaceSessionBoundary,
   createWakeLockController,
@@ -28,7 +28,7 @@ import {
   famousLocationById,
 } from "./famous-locations.js?v=3";
 
-const BUILD_VERSION = "1.3";
+const BUILD_VERSION = "1.4";
 
 (() => {
 

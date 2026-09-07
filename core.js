@@ -151,10 +151,12 @@ export function earthToLocalFromRowMajorMatrix(matrix, earth) {
 
 export function earthToLocalFromSensorMatrix(matrix, earth) {
   const [x, y, z] = earth;
+  // populateMatrix's column-major rotation is applied directly here.
+  // Transposing it again reverses east/west in the Pixel sensor captures.
   return [
-    matrix[0] * x + matrix[1] * y + matrix[2] * z,
-    matrix[4] * x + matrix[5] * y + matrix[6] * z,
-    matrix[8] * x + matrix[9] * y + matrix[10] * z,
+    matrix[0] * x + matrix[4] * y + matrix[8] * z,
+    matrix[1] * x + matrix[5] * y + matrix[9] * z,
+    matrix[2] * x + matrix[6] * y + matrix[10] * z,
   ];
 }
 

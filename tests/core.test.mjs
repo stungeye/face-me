@@ -147,8 +147,57 @@ test("orientation matrix helpers preserve their established layouts", () => {
       [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
       [1, 2, 3],
     ),
-    [8, 32, 56],
+    [32, 38, 44],
   );
+});
+
+test("captured Pixel east targets point toward the top edge and below the screen", () => {
+  const captures = [
+    {
+      earth: [0.999230, -0.000002, -0.039230],
+      matrix: [0.192584, 0.981080, -0.019863, 0, -0.981264, 0.192660, 0.001964, 0, 0.005754, 0.019113, 0.999801, 0, 0, 0, 0, 1],
+    },
+    {
+      earth: [0.987709, -0.000001, -0.156303],
+      matrix: [0.069829, 0.997334, -0.021177, 0, -0.997548, 0.069913, 0.003239, 0, 0.004711, 0.020899, 0.999770, 0, 0, 0, 0, 1],
+    },
+  ];
+  for (const { earth, matrix } of captures) {
+    const local = earthToLocalFromSensorMatrix(matrix, earth);
+    assert.ok(local[1] > 0.97, "east-facing phone must not place east behind it");
+    assert.ok(local[2] < 0, "chord must still dip below the screen");
+    assert.ok(angleDegBetween(local, ALIGNMENT_AXIS) < 12);
+  }
+});
+
+test("sensor transforms known headings, pitch, and roll into phone coordinates", () => {
+  // Basis vectors expressed in ENU: screen right, top edge, screen normal.
+  // Include non-cardinal headings so inverse rotations cannot pass by symmetry.
+  for (const heading of [0, 45, 90, 180, 270]) {
+    for (const pitch of [0, -9, 35]) {
+      for (const roll of [0, 25]) {
+        const h = heading * Math.PI / 180;
+        const p = pitch * Math.PI / 180;
+        const r = roll * Math.PI / 180;
+        const right = [Math.cos(h), -Math.sin(h), 0];
+        const top = [Math.sin(h) * Math.cos(p), Math.cos(h) * Math.cos(p), Math.sin(p)];
+        const normal = [-Math.sin(h) * Math.sin(p), -Math.cos(h) * Math.sin(p), Math.cos(p)];
+        const rolledRight = right.map((v, i) => v * Math.cos(r) - normal[i] * Math.sin(r));
+        const rolledNormal = normal.map((v, i) => v * Math.cos(r) + right[i] * Math.sin(r));
+        const matrix = [
+          rolledRight[0], top[0], rolledNormal[0], 0,
+          rolledRight[1], top[1], rolledNormal[1], 0,
+          rolledRight[2], top[2], rolledNormal[2], 0,
+          0, 0, 0, 1,
+        ];
+        assertVectorApproximately(earthToLocalFromSensorMatrix(matrix, top), [0, 1, 0]);
+        assertVectorApproximately(earthToLocalFromSensorMatrix(matrix, rolledRight), [1, 0, 0]);
+        assertVectorApproximately(earthToLocalFromSensorMatrix(matrix, rolledNormal), [0, 0, 1]);
+        const belowTop = top.map((v, i) => v * Math.cos(0.15) - rolledNormal[i] * Math.sin(0.15));
+        assertVectorApproximately(earthToLocalFromSensorMatrix(matrix, belowTop), [0, Math.cos(0.15), -Math.sin(0.15)]);
+      }
+    }
+  }
 });
 
 test("the renderer rotation still maps +Y, the phone top edge, onto its target", () => {
