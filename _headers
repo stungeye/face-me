@@ -3,3 +3,6 @@
 
 /sw.js
   Cache-Control: no-store
+
+/version.js
+  Cache-Control: no-store

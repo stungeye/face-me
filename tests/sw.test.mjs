@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
 const source = await readFile(new URL("../sw.js", import.meta.url), "utf8");
-const currentCache = source.match(/const CACHE = "([^"]+)"/)[1];
+const currentCache = `face-me-v${(await readFile(new URL("../version.js", import.meta.url), "utf8"))
+  .match(/FACE_ME_VERSION = "([^"]+)"/)[1]}`;
 const obsoleteCaches = ["face-me-v19", "face-me-v20", "face-me-v21", "face-me-v22"];
 function worker({ offline = false, failInstall = false } = {}) {
   const handlers = {}, deleted = [], requests = [], stored = new Map();
@@ -18,6 +19,8 @@ function worker({ offline = false, failInstall = false } = {}) {
     match: async request => stored.get(request.url || request),
   };
   vm.runInNewContext(source, {
+    globalThis: { FACE_ME_VERSION: currentCache.slice("face-me-v".length) },
+    importScripts: () => {},
     self: {
       location: { origin: "https://example.com" },
       addEventListener: (name, handler) => { handlers[name] = handler; },

@@ -19,17 +19,18 @@ import {
   smoothDirection,
   targetDetails,
   tiltAdjustmentDeg,
-} from "./core.js?v=17";
+} from "./core.js";
 import {
   createFaceSessionBoundary,
   createWakeLockController,
-} from "./lifecycle.js?v=13";
+} from "./lifecycle.js";
 import {
   FAMOUS_LOCATIONS,
   famousLocationById,
-} from "./famous-locations.js?v=3";
+} from "./famous-locations.js";
+import "./version.js";
 
-const BUILD_VERSION = "1.7";
+const BUILD_VERSION = globalThis.FACE_ME_VERSION;
 
 (() => {
 
@@ -285,7 +286,10 @@ const BUILD_VERSION = "1.7";
     alignmentText: document.querySelector("#alignment-text"),
     alignmentStatus: document.querySelector("#alignment-status"),
     canvas: document.querySelector("#arrow-canvas"),
+    buildVersion: document.querySelector("#build-version"),
   };
+
+  els.buildVersion.textContent = `Face Me v${BUILD_VERSION}`;
 
   let renderer = null;
   let rendererError = "";

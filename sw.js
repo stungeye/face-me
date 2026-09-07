@@ -1,13 +1,15 @@
 // Bump on every release so open clients detect the new deployment.
-const CACHE = "face-me-v27";
+importScripts("./version.js");
+const CACHE = `face-me-v${globalThis.FACE_ME_VERSION}`;
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=18",
-  "./app.js?v=26",
-  "./core.js?v=17",
-  "./lifecycle.js?v=13",
-  "./famous-locations.js?v=3",
+  "./styles.css",
+  "./app.js",
+  "./core.js",
+  "./lifecycle.js",
+  "./famous-locations.js",
+  "./version.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
