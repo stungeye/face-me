@@ -121,7 +121,7 @@ const BUILD_VERSION = "1.7";
           vec3 n = normalize(uRotation * aNormal);
           float depth = max(0.65, 3.35 - p.z);
           vec2 projected = vec2(p.x * uViewportScale.x, p.y * uViewportScale.y) * uFocal / depth;
-          gl_Position = vec4(projected, 0.18 + p.z * 0.035, 1.0);
+          gl_Position = vec4(projected, 0.18 - p.z * 0.035, 1.0);
           vec3 lightDir = normalize(vec3(-0.45, 0.70, 1.0));
           vShade = 0.30 + 0.70 * abs(dot(n, lightDir));
         }
