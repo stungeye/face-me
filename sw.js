@@ -1,12 +1,12 @@
-const CACHE = "face-me-v17";
+const CACHE = "face-me-v18";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=15",
-  "./app.js?v=17",
+  "./styles.css?v=16",
+  "./app.js?v=18",
   "./core.js?v=13",
   "./lifecycle.js?v=13",
-  "./famous-locations.js?v=2",
+  "./famous-locations.js?v=3",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png"

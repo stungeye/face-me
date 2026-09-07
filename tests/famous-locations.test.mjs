@@ -5,9 +5,19 @@ import {
   FAMOUS_LOCATIONS,
   famousLocationById,
 } from "../famous-locations.js";
+import { bearingDeg, targetDetails } from "../core.js";
 
 test("famous locations have unique IDs and their curated exact coordinates", () => {
   const expectedCoordinates = {
+    "check-north-500": [54.352954, -97.261698],
+    "check-east-500": [49.647111, -90.307132],
+    "check-south-500": [45.359750, -97.261698],
+    "check-west-500": [49.647111, -104.216264],
+    "check-north-2000": [67.842759, -97.261698],
+    "check-east-2000": [46.632807, -70.537708],
+    "check-south-2000": [31.869945, -97.261698],
+    "check-west-2000": [46.632807, -123.985688],
+    "check-antipode": [-49.856352, 82.738302],
     "kaaba-mecca": [21.4225, 39.8261667],
     "eiffel-tower": [48.8582972, 2.2944778],
     "great-pyramid-giza": [29.97915, 31.1342194],
@@ -56,4 +66,24 @@ test("Mecca selects the Kaaba coordinates", () => {
 
 test("an unknown famous location does not create a target", () => {
   assert.equal(famousLocationById("not-a-place"), null);
+});
+
+test("pointing checks are exact cardinal axes from their documented reference", () => {
+  const reference = { lat: 49.856352, lon: -97.261698 };
+  const checks = FAMOUS_LOCATIONS.filter(location => location.group === "Pointing checks");
+
+  assert.equal(checks.length, 9);
+  for (const location of checks) {
+    const details = targetDetails(reference, location);
+    if (Number.isFinite(location.checkHeadingDeg)) {
+      const headingError = Math.abs(bearingDeg(details.vector) - location.checkHeadingDeg);
+      assert.ok(headingError < 0.001, `${location.id} should be on its named axis`);
+      const expectedDistance = location.id.endsWith("2000") ? 2_000_000 : 500_000;
+      assert.ok(Math.abs(details.surfaceDistanceM - expectedDistance) < 0.1);
+      assert.ok(details.tiltDeg < 0);
+    } else {
+      assert.equal(location.id, "check-antipode");
+      assert.ok(details.tiltDeg < -89.5);
+    }
+  }
 });

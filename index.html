@@ -12,7 +12,7 @@
   <title>Face Me</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon-192.png" />
-  <link rel="stylesheet" href="./styles.css?v=15" />
+  <link rel="stylesheet" href="./styles.css?v=16" />
 </head>
 <body>
   <main id="setup" class="setup" aria-labelledby="app-title">
@@ -101,6 +101,10 @@
             <strong id="preview-distance">—</strong>
           </div>
           <div>
+            <span class="preview-label">True heading</span>
+            <strong id="preview-heading">—</strong>
+          </div>
+          <div>
             <span class="preview-label">Direction</span>
             <strong id="preview-tilt">—</strong>
           </div>
@@ -115,7 +119,7 @@
 
       <p class="pointer-note"><strong>How to point:</strong> the <em>top edge</em> of your phone is the pointer. Hold it flat for nearby targets; tilt it downward for distant ones.</p>
       <p class="privacy-note">Face Me has no coordinate backend or API. Shared links contain latitude and longitude in the URL, which your web host may log.</p>
-      <p class="build-version" aria-label="Build version">Face Me v1.2</p>
+      <p class="build-version" aria-label="Build version">Face Me v1.3</p>
     </section>
   </main>
 
@@ -152,9 +156,10 @@
     <aside id="debug-panel" class="debug-panel" hidden aria-label="Debug information">
       <div class="debug-title">DEBUG · DOUBLE TAP TO HIDE</div>
       <dl id="debug-values"></dl>
+      <button id="copy-checking-details" class="debug-copy" type="button">Copy checking details</button>
     </aside>
   </section>
 
-  <script type="module" src="./app.js?v=17"></script>
+  <script type="module" src="./app.js?v=18"></script>
 </body>
 </html>

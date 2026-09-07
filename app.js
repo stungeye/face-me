@@ -26,7 +26,9 @@ import {
 import {
   FAMOUS_LOCATIONS,
   famousLocationById,
-} from "./famous-locations.js?v=2";
+} from "./famous-locations.js?v=3";
+
+const BUILD_VERSION = "1.3";
 
 (() => {
 
@@ -263,6 +265,7 @@ import {
     targetStatus: document.querySelector("#target-status"),
     targetPreview: document.querySelector("#target-preview"),
     previewDistance: document.querySelector("#preview-distance"),
+    previewHeading: document.querySelector("#preview-heading"),
     previewTilt: document.querySelector("#preview-tilt"),
     setupMessage: document.querySelector("#setup-message"),
     faceButton: document.querySelector("#face-button"),
@@ -274,6 +277,7 @@ import {
     sensorWarning: document.querySelector("#sensor-warning"),
     debugPanel: document.querySelector("#debug-panel"),
     debugValues: document.querySelector("#debug-values"),
+    copyCheckingDetails: document.querySelector("#copy-checking-details"),
     alignment: document.querySelector("#alignment"),
     alignmentText: document.querySelector("#alignment-text"),
     alignmentStatus: document.querySelector("#alignment-status"),
@@ -425,6 +429,7 @@ import {
       return;
     }
     els.previewDistance.textContent = formatDistance(target.chordDistanceM);
+    els.previewHeading.textContent = `${fmt(bearingDeg(target.vector), 1)}°`;
     els.previewTilt.textContent = formatTilt(target.tiltDeg);
     els.targetPreview.hidden = false;
   }
@@ -743,6 +748,72 @@ import {
     els.debugValues.replaceChildren(fragment);
   }
 
+  function selectedTargetDescription() {
+    if (selectedTargetSource() !== "famous") return { name: "User input", nominalHeading: null };
+    const location = famousLocationById(els.famousLocation.value);
+    return {
+      name: location ? `${location.name} — ${location.country}` : "Unknown target",
+      nominalHeading: Number.isFinite(location?.checkHeadingDeg) ? location.checkHeadingDeg : null,
+    };
+  }
+
+  function formatVector(vector, digits = 6) {
+    return vector
+      ? `[${Array.from(vector, value => fmt(value, digits)).join(", ")}]`
+      : "—";
+  }
+
+  function checkingDetails() {
+    const now = performance.now();
+    const enu = state.targetUnitEnu;
+    const local = state.rawLocalDirection;
+    const targetDescription = selectedTargetDescription();
+    const orientationMatrix = state.sensorMatrix
+      ? Array.from(state.sensorMatrix)
+      : ([state.alpha, state.beta, state.gamma].every(Number.isFinite)
+        ? deviceOrientationMatrix(state.alpha, state.beta, state.gamma)
+        : null);
+    const orientationKind = state.sensorMatrix ? "sensor 4×4, column-major" : "event 3×3, row-major";
+
+    return [
+      "FACE ME POINTING CHECK",
+      `Build: Face Me v${BUILD_VERSION}`,
+      `Captured: ${new Date().toISOString()}`,
+      `Target choice: ${targetDescription.name}`,
+      `Nominal table heading: ${targetDescription.nominalHeading === null ? "not applicable" : `${String(targetDescription.nominalHeading).padStart(3, "0")}° true`}`,
+      `Live expected heading: ${enu ? `${fmt(bearingDeg(enu), 3)}° true` : "—"}`,
+      `Live expected chord tilt: ${enu ? `${fmt(inclinationDeg(enu), 3)}°` : "—"}`,
+      `Your GPS: ${state.current ? formatCoordinates(state.current, 7) : "—"}`,
+      `GPS accuracy: ${Number.isFinite(state.accuracy) ? `±${fmt(state.accuracy, 1)} m` : "—"}`,
+      `Target GPS: ${state.target ? formatCoordinates(state.target, 7) : "—"}`,
+      `Surface distance: ${Number.isFinite(state.surfaceDistanceM) ? `${fmt(state.surfaceDistanceM, 1)} m` : "—"}`,
+      `Direct chord: ${Number.isFinite(state.chordDistanceM) ? `${fmt(state.chordDistanceM, 1)} m` : "—"}`,
+      `Target ENU unit: ${formatVector(enu)}`,
+      "",
+      "OBSERVATION (fill these in after pasting)",
+      "Reference compass heading: ___°",
+      "Reference compass north: magnetic / true",
+      "Phone: flat, screen up: yes / no",
+      "Arrow points toward top edge: yes / no / unclear",
+      "What the arrow appeared to do: ___",
+      "",
+      "SENSOR SNAPSHOT",
+      `Sensor path: ${state.sensorSource}`,
+      `Sensor says absolute: ${state.sensorAbsolute ? "yes" : "no / uncertain"}`,
+      `Sensor age: ${state.lastSensorReadingAt ? `${Math.round(now - state.lastSensorReadingAt)} ms` : "—"}`,
+      `Sensor error: ${state.sensorError || rendererError || "—"}`,
+      `Raw target in phone frame: ${formatVector(local)}`,
+      `Smoothed display vector: ${formatVector(state.displayDirection)}`,
+      `Raw top-edge alignment error: ${local ? `${fmt(angleDegBetween(local, ALIGNMENT_AXIS), 3)}°` : "—"}`,
+      `α β γ: [${fmt(state.alpha, 3)}, ${fmt(state.beta, 3)}, ${fmt(state.gamma, 3)}]`,
+      `Orientation matrix (${orientationKind}): ${formatVector(orientationMatrix)}`,
+      `Screen: ${screen.orientation?.type || "unknown"} ${screen.orientation?.angle ?? 0}°`,
+      `Renderer: ${rendererType}`,
+      `User agent: ${navigator.userAgent}`,
+      "North-frame caveat: browser absolute orientation may use magnetic rather than true north.",
+    ].join("\n");
+  }
+
   function frame(now) {
     if (!faceSession.active) {
       state.animationId = null;
@@ -960,6 +1031,16 @@ import {
     }
   });
 
+  els.copyCheckingDetails.addEventListener("click", async event => {
+    event.stopPropagation();
+    try {
+      await copyText(checkingDetails());
+      momentaryButtonLabel(els.copyCheckingDetails, "Checking details copied", "Copy checking details", 1600);
+    } catch {
+      momentaryButtonLabel(els.copyCheckingDetails, "Could not copy", "Copy checking details", 1600);
+    }
+  });
+
   els.targetInput.addEventListener("input", () => {
     updateTargetState();
     setMessage("");
@@ -995,7 +1076,7 @@ import {
   });
 
   els.faceStage.addEventListener("pointerup", event => {
-    if (event.target === els.exitFace) return;
+    if (event.target === els.exitFace || els.debugPanel.contains(event.target)) return;
     const now = performance.now();
     if (now - state.lastTapAt < 330) {
       state.debug = !state.debug;
