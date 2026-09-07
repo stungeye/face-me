@@ -18,7 +18,7 @@ import {
   rotationMatrixFromY,
   smoothDirection,
   targetDetails,
-} from "./core.js?v=14";
+} from "./core.js?v=15";
 import {
   createFaceSessionBoundary,
   createWakeLockController,
@@ -28,7 +28,7 @@ import {
   famousLocationById,
 } from "./famous-locations.js?v=3";
 
-const BUILD_VERSION = "1.5";
+const BUILD_VERSION = "1.6";
 
 (() => {
 
@@ -418,18 +418,24 @@ const BUILD_VERSION = "1.5";
     updateTargetPreview();
   }
 
+  function selectedPointingMode() {
+    return document.querySelector("#pointing-mode").value;
+  }
+
   function updateTargetPreview() {
     if (!state.current || !state.target) {
       els.targetPreview.hidden = true;
       return;
     }
-    const target = targetDetails(state.current, state.target);
+    const target = targetDetails(state.current, state.target, selectedPointingMode());
     if (target.chordDistanceM < 0.5) {
       els.targetPreview.hidden = true;
       return;
     }
-    els.previewDistance.textContent = formatDistance(target.chordDistanceM);
-    els.previewHeading.textContent = `${fmt(bearingDeg(target.vector), 1)}°`;
+    const surface = selectedPointingMode() === "surface";
+    document.querySelector("#preview-distance-label").textContent = surface ? "Surface distance" : "Direct line";
+    els.previewDistance.textContent = formatDistance(surface ? target.surfaceDistanceM : target.chordDistanceM);
+    els.previewHeading.textContent = target.vector ? `${fmt(bearingDeg(target.vector), 1)}°` : "No unique heading";
     els.previewTilt.textContent = formatTilt(target.tiltDeg);
     els.targetPreview.hidden = false;
   }
@@ -443,7 +449,7 @@ const BUILD_VERSION = "1.5";
     const accuracy = Number.isFinite(state.accuracy) ? Math.round(state.accuracy) : null;
     setGpsStatus(accuracy ? `±${accuracy} m` : "ready", accuracy && accuracy <= 30 ? "good" : "neutral");
     updateTargetState();
-    if (faceSession.active) recalculateTargetVector();
+    if (faceSession.active && !recalculateTargetVector()) void exitFaceMode();
   }
 
   function locationError(error) {
@@ -499,15 +505,21 @@ const BUILD_VERSION = "1.5";
 
   function recalculateTargetVector() {
     if (!state.current || !state.target) return false;
-    const target = targetDetails(state.current, state.target);
+    const target = targetDetails(state.current, state.target, selectedPointingMode());
     if (target.chordDistanceM < 0.5) {
       setMessage("Those coordinates are effectively your current location, so there is no direction to point.");
+      return false;
+    }
+    if (!target.vector) {
+      setMessage("Opposite points on Earth have no unique surface heading. Choose Through Earth mode or a different target.");
       return false;
     }
     state.targetUnitEnu = target.vector;
     state.chordDistanceM = target.chordDistanceM;
     state.surfaceDistanceM = target.surfaceDistanceM;
-    els.faceDistance.textContent = `direct ${formatDistance(state.chordDistanceM)}`;
+    els.faceDistance.textContent = selectedPointingMode() === "surface"
+      ? `surface ${formatDistance(state.surfaceDistanceM)}`
+      : `direct ${formatDistance(state.chordDistanceM)}`;
     els.faceTilt.textContent = formatTilt(target.tiltDeg);
     return true;
   }
@@ -723,12 +735,13 @@ const BUILD_VERSION = "1.5";
       ["sensor age", state.lastSensorReadingAt ? `${Math.round(now - state.lastSensorReadingAt)} ms` : "—"],
       ["sensor error", state.sensorError || rendererError || "—"],
       ["you", state.current ? formatCoordinates(state.current) : "—"],
+      ["mode", selectedPointingMode()],
       ["target", state.target ? formatCoordinates(state.target) : "—"],
       ["GPS accuracy", Number.isFinite(state.accuracy) ? `±${Math.round(state.accuracy)} m` : "—"],
       ["surface", formatDistance(state.surfaceDistanceM)],
       ["direct chord", formatDistance(state.chordDistanceM)],
       ["bearing", `${fmt(bearingDeg(enu), 1)}° true`],
-      ["chord tilt", `${fmt(inclinationDeg(enu), 1)}°`],
+      ["target tilt", `${fmt(inclinationDeg(enu), 1)}°`],
       ["ENU unit", `[${fmt(enu[0], 3)}, ${fmt(enu[1], 3)}, ${fmt(enu[2], 3)}]`],
       ["phone unit", `[${fmt(local[0], 3)}, ${fmt(local[1], 3)}, ${fmt(local[2], 3)}]`],
       ["alignment", state.rawLocalDirection ? `${fmt(angleDegBetween(local, ALIGNMENT_AXIS), 1)}°` : "—"],
@@ -778,11 +791,12 @@ const BUILD_VERSION = "1.5";
     return [
       "FACE ME POINTING CHECK",
       `Build: Face Me v${BUILD_VERSION}`,
+      `Pointing mode: ${selectedPointingMode()}`,
       `Captured: ${new Date().toISOString()}`,
       `Target choice: ${targetDescription.name}`,
       `Nominal table heading: ${targetDescription.nominalHeading === null ? "not applicable" : `${String(targetDescription.nominalHeading).padStart(3, "0")}° true`}`,
       `Live expected heading: ${enu ? `${fmt(bearingDeg(enu), 3)}° true` : "—"}`,
-      `Live expected chord tilt: ${enu ? `${fmt(inclinationDeg(enu), 3)}°` : "—"}`,
+      `Live expected target tilt: ${enu ? `${fmt(inclinationDeg(enu), 3)}°` : "—"}`,
       `Your GPS: ${state.current ? formatCoordinates(state.current, 7) : "—"}`,
       `GPS accuracy: ${Number.isFinite(state.accuracy) ? `±${fmt(state.accuracy, 1)} m` : "—"}`,
       `Target GPS: ${state.target ? formatCoordinates(state.target, 7) : "—"}`,
@@ -1040,6 +1054,14 @@ const BUILD_VERSION = "1.5";
     } catch {
       momentaryButtonLabel(els.copyCheckingDetails, "Could not copy", "Copy checking details", 1600);
     }
+  });
+
+  document.querySelector("#pointing-mode").addEventListener("change", () => {
+    document.querySelector("#mode-hint").textContent = selectedPointingMode() === "surface"
+      ? "Follow the initial great-circle heading along Earth's surface. The arrow stays horizontal."
+      : "Point along the straight line to them, through the Earth. Distant targets point below the horizon.";
+    setMessage("");
+    updateTargetPreview();
   });
 
   els.targetInput.addEventListener("input", () => {

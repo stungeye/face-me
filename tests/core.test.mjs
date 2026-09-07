@@ -227,3 +227,41 @@ test("normalization and time-based smoothing return finite unit directions", () 
   assert.deepEqual(current, [0, 1, 0]);
   assert.deepEqual(target, [1, 0, 0]);
 });
+
+
+test("surface mode follows cardinal great-circle headings at the horizon", () => {
+  const origin = { lat: 0, lon: 0 };
+  for (const [to, expected] of [
+    [{ lat: 60, lon: 0 }, [0, 1, 0]],
+    [{ lat: -60, lon: 0 }, [0, -1, 0]],
+    [{ lat: 0, lon: 120 }, [1, 0, 0]],
+    [{ lat: 0, lon: -120 }, [-1, 0, 0]],
+  ]) {
+    const surface = targetDetails(origin, to, "surface");
+    surface.vector.forEach((value, i) => assertApproximately(value, expected[i]));
+    assert.equal(surface.tiltDeg, 0);
+    assert.ok(surface.surfaceDistanceM > surface.chordDistanceM);
+    const direct = targetDetails(origin, to, "direct");
+    assert.ok(direct.tiltDeg < 0);
+    assert.deepEqual(direct.vector, directVectorEnu(origin, to).vector);
+  }
+});
+
+test("surface route crosses the date line and bends poleward at high latitudes", () => {
+  const dateLine = targetDetails({ lat: 0, lon: 179 }, { lat: 0, lon: -179 }, "surface");
+  assertApproximately(dateLine.vector[0], 1);
+  assert.ok(dateLine.surfaceDistanceM < 223000);
+  const polar = targetDetails({ lat: 80, lon: 0 }, { lat: 80, lon: 180 }, "surface");
+  assertApproximately(polar.vector[1], 1);
+  assert.equal(polar.vector[2], 0);
+});
+
+test("surface degeneracies have no bearing while direct antipodes still point down", () => {
+  assert.equal(targetDetails(WINNIPEG, WINNIPEG, "surface").vector, null);
+  assert.equal(targetDetails(WINNIPEG, DOCUMENTED_TARGETS.antipode, "surface").vector, null);
+  assert.ok(targetDetails(WINNIPEG, DOCUMENTED_TARGETS.antipode, "direct").tiltDeg < -89);
+  const nearbyAntipode = { ...DOCUMENTED_TARGETS.antipode, lat: -49.89 };
+  const surface = targetDetails(WINNIPEG, nearbyAntipode, "surface");
+  assertApproximately(Math.hypot(...surface.vector), 1);
+  assert.equal(surface.vector[2], 0);
+});

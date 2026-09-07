@@ -4,9 +4,9 @@
 
 Face Me is an Android-first PWA for two people who want to physically point toward one another from anywhere on Earth.
 
-Each person obtains their own GPS latitude/longitude, shares it manually (plain coordinates or a URL), enters the other person's coordinates, and then enters a full-screen arrow mode. The arrow represents the literal 3D vector from the current device to the target location.
+Each person obtains their own GPS latitude/longitude, shares it manually (plain coordinates or a URL), enters the other person's coordinates, and then enters a full-screen arrow mode. The arrow represents the selected surface heading or literal 3D vector from the current device to the target location.
 
-This is intentionally **not** a surface-navigation compass. For distant targets the arrow dips below the horizon; an antipodal target points essentially straight down through Earth.
+The app has two modes: **Surface** (default), using a horizontal initial great-circle heading on a spherical Earth, and **Through Earth**, preserving the original WGS84 chord. In Through Earth mode, distant targets dip below the horizon and antipodal targets point essentially straight down. Exact antipodes have no unique Surface heading.
 
 Current public deployment: https://face-me.netlify.app/
 Primary test hardware/browser: Google Pixel 8 Pro, Chrome on Android.
@@ -46,7 +46,7 @@ Key functions:
 
 `ALIGNMENT_AXIS = [0, 1, 0]` means the top edge of the phone is the pointing axis.
 
-The cardinal directions and antipode have been physically tested successfully on the Pixel 8 Pro. Avoid replacing this with a great-circle bearing implementation.
+The cardinal directions and antipode have been physically tested successfully on the Pixel 8 Pro. Preserve this in Through Earth mode. Surface mode uses the separate `surfaceVectorEnu()` calculation.
 
 ## Sensor strategy
 

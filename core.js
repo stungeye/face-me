@@ -205,12 +205,25 @@ export function rotationMatrixFromY(direction, out) {
   return out;
 }
 
-export function targetDetails(from, to) {
+// Initial great-circle direction on a spherical Earth, tangent to the horizon.
+// Coincident and antipodal points have no unique initial bearing.
+export function surfaceVectorEnu(from, to) {
+  const phi1 = from.lat * DEG;
+  const phi2 = to.lat * DEG;
+  const delta = (to.lon - from.lon) * DEG;
+  const east = Math.cos(phi2) * Math.sin(delta);
+  const north = Math.cos(phi1) * Math.sin(phi2)
+    - Math.sin(phi1) * Math.cos(phi2) * Math.cos(delta);
+  return Math.hypot(east, north) > 1e-12 ? normalize([east, north, 0]) : null;
+}
+
+export function targetDetails(from, to, mode = "direct") {
   const direct = directVectorEnu(from, to);
+  const vector = mode === "surface" ? surfaceVectorEnu(from, to) : direct.vector;
   return {
-    vector: direct.vector,
+    vector,
     chordDistanceM: direct.chordDistanceM,
     surfaceDistanceM: surfaceDistanceM(from, to),
-    tiltDeg: inclinationDeg(direct.vector),
+    tiltDeg: vector ? inclinationDeg(vector) : NaN,
   };
 }

@@ -1,7 +1,7 @@
 {
   "name": "Face Me",
   "short_name": "Face Me",
-  "description": "Point directly toward another latitude and longitude — even through the Earth.",
+  "description": "Point toward another location along the surface or directly through the Earth.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

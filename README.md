@@ -1,4 +1,4 @@
-# Face Me — v1.3
+# Face Me — v1.6
 
 An Android-first PWA that lets two people point directly toward one another using shared latitude/longitude coordinates.
 
@@ -7,13 +7,15 @@ An Android-first PWA that lets two people point directly toward one another usin
 1. Face Me gets your current GPS latitude/longitude.
 2. Copy your coordinates or a shareable URL containing them as `?lat=...&lon=...`.
 3. Enter or paste the other person's coordinates, or choose a famous location. Opening one of the shared URLs fills the manual input automatically.
-4. Tap **FACE ME**.
+4. Choose **Surface** (the default) or **Through Earth**, then tap **FACE ME**.
 5. The screen becomes a black direction view with a 3D arrow.
 6. The **top edge of the phone** is the pointing vector. Rotate and tilt the phone until the arrow aligns with that edge.
 7. Double-tap the black direction screen to show/hide debug information.
 8. During a pointing check, use **Copy checking details** in debug mode and paste the report back with the short observation fields completed.
 
-The direction is the literal three-dimensional chord between the two WGS84 locations, not a surface-navigation bearing. Long-distance targets therefore point below the horizon and an antipodal target points almost straight down through the Earth.
+Surface mode follows the initial great-circle bearing on a spherical Earth, with a horizontal pointing vector and surface distance. It updates as your GPS position changes. It is a heading, not road or trail routing. Coincident locations and exact antipodes have no unique surface direction.
+
+Through Earth mode preserves the literal three-dimensional chord between the two WGS84 locations. Long-distance targets point below the horizon and an antipodal target points almost straight down through the Earth. Both modes use the same phone orientation and top-edge alignment.
 
 ## v1.3 changes
 
@@ -97,7 +99,7 @@ For the first deployment of this updater, an already-open older app may need one
 2. In a compass app that clearly labels its north reference, select **true north**, place the phone flat and screen-up, then rotate the top edge to the test target's nominal heading: north `000°`, east `090°`, south `180°` or west `270°`.
 3. In Face Me, refresh GPS and select a target under **Pointing checks**. These targets are exact axes from `49.856352, -97.261698`; elsewhere, note the live **True heading** in the setup preview rather than using the nominal heading. Switch to the compass, set that heading, then return to Face Me without rotating the phone.
 4. Tap **FACE ME**, double-tap the arrow screen, then tap **Copy checking details**. Paste the report and complete its observation fields.
-5. Repeat each orientation at least three times after deliberately rotating away and returning. Test the 500 km set first. Flat, those targets are only about `2.25°` below the horizon. The 2,000 km set is about `9°` down and is useful for testing tilt separately. The antipode should point almost straight down.
+5. Select **Through Earth** for these original chord checks. Repeat each orientation at least three times after deliberately rotating away and returning. Test the 500 km set first. Flat, those targets are only about `2.25°` below the horizon. The 2,000 km set is about `9°` down and is useful for testing tilt separately. The antipode should point almost straight down.
 
 A second compass app on the same phone is a repeatability reference, not independent ground truth: both apps ultimately use the same physical sensors. A surveyed sightline, map-derived building edge or separate baseplate compass gives a stronger cross-check.
 

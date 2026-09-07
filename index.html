@@ -8,7 +8,7 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="description" content="Point directly at another latitude and longitude — even through the Earth." />
+  <meta name="description" content="Point toward another location along the surface or directly through the Earth." />
   <title>Face Me</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon-192.png" />
@@ -21,11 +21,11 @@
         <div class="brand-mark" aria-hidden="true">↑</div>
         <div>
           <h1 id="app-title">Face Me</h1>
-          <p>Two people. One straight line.</p>
+          <p>Two people. Find your direction.</p>
         </div>
       </header>
 
-      <p class="intro">Share your coordinates, enter theirs, then use your phone to point directly at them — even when the shortest line goes through the Earth.</p>
+      <p class="intro">Share your coordinates, enter theirs, then point toward them along the surface or directly through the Earth.</p>
 
       <section class="coord-block" aria-labelledby="your-location-heading">
         <div class="section-heading">
@@ -97,7 +97,7 @@
 
         <div id="target-preview" class="target-preview" hidden>
           <div>
-            <span class="preview-label">Direct line</span>
+            <span id="preview-distance-label" class="preview-label">Surface distance</span>
             <strong id="preview-distance">—</strong>
           </div>
           <div>
@@ -111,15 +111,24 @@
         </div>
       </section>
 
+      <label class="field-label" for="pointing-mode">Pointing mode</label>
+      <div class="select-wrap">
+        <select id="pointing-mode" aria-describedby="mode-hint">
+          <option value="surface" selected>Surface</option>
+          <option value="direct">Through Earth</option>
+        </select>
+      </div>
+      <p id="mode-hint" class="hint">Follow the initial great-circle heading along Earth's surface. The arrow stays horizontal.</p>
+
       <p id="setup-message" class="message" role="status" aria-live="polite"></p>
       <button id="face-button" type="button" class="primary" disabled>
         <span>FACE ME</span>
         <span aria-hidden="true">→</span>
       </button>
 
-      <p class="pointer-note"><strong>How to point:</strong> the <em>top edge</em> of your phone is the pointer. Hold it flat for nearby targets; tilt it downward for distant ones.</p>
+      <p class="pointer-note"><strong>How to point:</strong> the <em>top edge</em> of your phone is the pointer. Hold it flat in Surface mode. In Through Earth mode, tilt it downward for distant targets.</p>
       <p class="privacy-note">Face Me has no coordinate backend or API. Shared links contain latitude and longitude in the URL, which your web host may log.</p>
-      <p class="build-version" aria-label="Build version">Face Me v1.5</p>
+      <p class="build-version" aria-label="Build version">Face Me v1.6</p>
     </section>
   </main>
 
@@ -160,6 +169,6 @@
     </aside>
   </section>
 
-  <script type="module" src="./app.js?v=20"></script>
+  <script type="module" src="./app.js?v=21"></script>
 </body>
 </html>

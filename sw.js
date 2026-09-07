@@ -1,11 +1,11 @@
 // Bump on every release so open clients detect the new deployment.
-const CACHE = "face-me-v20";
+const CACHE = "face-me-v21";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css?v=16",
-  "./app.js?v=20",
-  "./core.js?v=14",
+  "./app.js?v=21",
+  "./core.js?v=15",
   "./lifecycle.js?v=13",
   "./famous-locations.js?v=3",
   "./manifest.webmanifest",
