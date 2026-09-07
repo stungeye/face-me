@@ -43,6 +43,10 @@ function assertVectorApproximately(actual, expected, epsilon = 1e-9) {
 test("plain coordinate parsing accepts supported forms and rejects invalid ranges", () => {
   assert.deepEqual(parseCoordinates("49.8951, -97.1384"), WINNIPEG);
   assert.deepEqual(parseCoordinates("(49.895100° -97.138400º)"), WINNIPEG);
+  assert.deepEqual(parseCoordinates(" [ +49.895100 °, -97.138400 º ] "), WINNIPEG);
+  assert.deepEqual(parseCoordinates("49.895100\t-97.138400"), WINNIPEG);
+  assert.deepEqual(parseCoordinates("-.5, -97.1384"), { lat: -0.5, lon: -97.1384 });
+  assert.deepEqual(parseCoordinates("+.5 .25"), { lat: 0.5, lon: 0.25 });
   assert.deepEqual(parseCoordinates("90, 180"), { lat: 90, lon: 180 });
   assert.deepEqual(parseCoordinates("-90, -180"), { lat: -90, lon: -180 });
 
@@ -50,6 +54,36 @@ test("plain coordinate parsing accepts supported forms and rejects invalid range
   assert.equal(parseCoordinates("not coordinates"), null);
   assert.equal(parseCoordinates("90.000001, 0"), null);
   assert.equal(parseCoordinates("0, 180.000001"), null);
+});
+
+test("plain coordinate parsing rejects fragments, unsupported notation, and malformed pairs", () => {
+  for (const text of [
+    "49.8951 N, 97.1384 W",
+    "49° 53' 42\" N, 97° 8' 18\" W",
+    "https://face-me.netlify.app/?lat=49.8951&lon=-97.1384",
+    "latitude 49.8951, longitude -97.1384",
+    "49.8951, -97.1384 trailing text",
+    "49.8951, -97.1384, 10",
+    "49.8951 -97.1384 10",
+    "--49.8951, -97.1384",
+    "+-49.8951, -97.1384",
+    "- 49.8951, -97.1384",
+    "49.8951, -97..1384",
+    "49., -97.1384",
+    "4.98951e1, -97.1384",
+    "(49.8951, -97.1384]",
+    "(49.8951, -97.1384",
+    "49.8951, -97.1384)",
+    "((49.8951, -97.1384))",
+    "49.8951,, -97.1384",
+    ", -97.1384",
+    "49.8951,",
+    "49.8951-97.1384",
+    "-90.000001, 0",
+    "0, -180.000001",
+  ]) {
+    assert.equal(parseCoordinates(text), null, text);
+  }
 });
 
 test("shared-link parsing requires two explicitly present, nonblank coordinates", () => {

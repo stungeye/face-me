@@ -87,10 +87,16 @@ function validCoordinates(lat, lon) {
 
 export function parseCoordinates(text) {
   if (!text) return null;
-  const cleaned = String(text).trim().replace(/[()\[\]]/g, " ").replace(/[°º]/g, " ");
-  const matches = cleaned.match(/[-+]?\d+(?:\.\d+)?/g);
-  if (!matches || matches.length < 2) return null;
-  return validCoordinates(Number(matches[0]), Number(matches[1]));
+  let cleaned = String(text).trim();
+  const closingWrapper = { "(": ")", "[": "]" }[cleaned[0]];
+  if (closingWrapper) {
+    if (!cleaned.endsWith(closingWrapper)) return null;
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  // Consume the whole decimal pair so unsupported notation cannot change its meaning.
+  const matches = cleaned.match(/^([-+]?(?:\d+(?:\.\d+)?|\.\d+))(?:\s*[°º])?(?:\s*,\s*|\s+)([-+]?(?:\d+(?:\.\d+)?|\.\d+))(?:\s*[°º])?$/);
+  if (!matches) return null;
+  return validCoordinates(Number(matches[1]), Number(matches[2]));
 }
 
 export function parseCoordinatesFromSearch(search) {

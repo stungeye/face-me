@@ -19,7 +19,7 @@ import {
   smoothDirection,
   targetDetails,
   tiltAdjustmentDeg,
-} from "./core.js?v=16";
+} from "./core.js?v=17";
 import {
   createFaceSessionBoundary,
   createWakeLockController,
