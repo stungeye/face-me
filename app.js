@@ -714,10 +714,15 @@ const BUILD_VERSION = "1.7";
     els.alignmentStatus.textContent = ALIGNMENT_STATUS_TEXT[status];
   }
 
+  function hasFreshOrientation(now) {
+    return Boolean(state.rawLocalDirection && state.sensorAbsolute
+      && now - state.lastSensorReadingAt < 2000);
+  }
+
   function updateAlignmentUi(error, now) {
     if (now - state.lastUiAt < 90) return;
     state.lastUiAt = now;
-    const freshTilt = state.displayTilt !== null && now - state.lastSensorReadingAt < 2000;
+    const freshTilt = state.displayTilt !== null && hasFreshOrientation(now);
     const tilt = state.displayTilt;
     const matched = freshTilt && Math.abs(tilt) < 3;
     els.tiltLevel.dataset.state = freshTilt ? (matched ? "matched" : "adjust") : "waiting";
@@ -860,7 +865,11 @@ const BUILD_VERSION = "1.7";
     const dt = state.lastFrameAt ? Math.min(50, now - state.lastFrameAt) : 16.7;
     state.lastFrameAt = now;
 
-    if (state.rawLocalDirection) {
+    const directionAvailable = hasFreshOrientation(now);
+    const visibility = directionAvailable ? "visible" : "hidden";
+    const availabilityChanged = els.canvas.style.visibility !== visibility;
+    if (availabilityChanged) els.canvas.style.visibility = visibility;
+    if (directionAvailable) {
       state.displayDirection = smoothDirection(state.displayDirection, state.rawLocalDirection, dt);
       if (state.localUp) {
         const tilt = tiltAdjustmentDeg(state.targetUnitEnu, state.localUp);
@@ -871,7 +880,8 @@ const BUILD_VERSION = "1.7";
       renderer?.render(state.displayDirection, error);
       updateAlignmentUi(error, now);
     } else {
-      if (now - state.lastUiAt >= 90) {
+      state.displayTilt = null;
+      if (availabilityChanged || state.lastAlignmentStatus !== "acquiring" || now - state.lastUiAt >= 90) {
         state.lastUiAt = now;
         state.facing = false;
         state.lastAlignmentText = "acquiring direction…";
@@ -883,11 +893,10 @@ const BUILD_VERSION = "1.7";
         els.tiltCue.textContent = "Waiting";
         els.tiltLevel.setAttribute("aria-label", "Top edge tilt: waiting for sensor");
         setAccessibleAlignmentStatus("acquiring", now, true);
-        if (state.sensorSource === "deviceorientation" && !state.sensorAbsolute) {
+        if (state.rawLocalDirection || (state.sensorSource === "deviceorientation" && !state.sensorAbsolute)) {
           els.sensorWarning.hidden = false;
         }
       }
-      renderer?.render(state.displayDirection, 180);
     }
 
     updateDebugPanel(now);
