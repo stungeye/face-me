@@ -70,11 +70,16 @@ npm test
 
 ## Release checklist
 
+The app checks for a new service worker on launch, on returning to the app, on reconnecting, and every five minutes while visible. New releases activate automatically, remove old Face Me caches, and reload setup while preserving the entered target. In arrow mode, reload waits until exit. Offline use retains the last cached app. Netlify's `_headers` file forces HTTP revalidation, and worker installation bypasses the HTTP cache.
+
+For the first deployment of this updater, an already-open older app may need one normal close/reopen or reload to pick up the new client code. Clearing site data is unnecessary.
+
 - Update the cache name in `sw.js` and the query versions for every changed cached CSS or JavaScript file in `index.html`, `app.js` and `sw.js`.
 - Run `npm test`, JavaScript syntax checks and a DOM ID/binding check.
 - Verify that the target starts blank without URL parameters and that a valid shared `?lat=...&lon=...` link fills it.
 - Enter and exit arrow mode repeatedly; confirm focus moves to the exit button and back to setup, and that animation, sensors, GPS watch and wake lock stop on exit.
 - Load once online, switch the browser offline and verify that both the app root and a valid shared URL reload.
+- With the previous release open, deploy the next version and return to the app; verify automatic refresh preserves the target. Repeat in arrow mode and verify refresh waits until exit.
 - Validate `manifest.webmanifest` and confirm both declared icons load.
 - On the Pixel 8 Pro over HTTPS, verify the preferred sensor and fallbacks, then physically test north, east, south, west and the antipode.
 

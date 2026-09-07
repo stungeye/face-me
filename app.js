@@ -28,7 +28,7 @@ import {
   famousLocationById,
 } from "./famous-locations.js?v=3";
 
-const BUILD_VERSION = "1.4";
+const BUILD_VERSION = "1.5";
 
 (() => {
 
@@ -987,6 +987,7 @@ const BUILD_VERSION = "1.4";
     state.lastAlignmentStatusAt = 0;
     try { screen.orientation?.unlock?.(); } catch {}
     try { if (document.fullscreenElement) await document.exitFullscreen(); } catch {}
+    applyPendingUpdate();
   }
 
   async function copyText(text) {
@@ -1098,14 +1099,65 @@ const BUILD_VERSION = "1.4";
     }
   });
 
+  const updateDraftKey = "face-me-update-draft";
+  let updatePending = false;
+  let reloadingForUpdate = false;
+
+  function applyPendingUpdate() {
+    if (!updatePending || reloadingForUpdate || faceSession.active) return;
+    // Keep in-progress input only across this update, not future app launches.
+    try {
+      sessionStorage.setItem(updateDraftKey, JSON.stringify({
+        input: els.targetInput.value,
+        source: selectedTargetSource(),
+        famous: els.famousLocation.value,
+      }));
+    } catch {
+      // If storage is disabled, wait until the user has cleared their input.
+      if (els.targetInput.value || els.famousLocation.value) return;
+    }
+    reloadingForUpdate = true;
+    window.location.reload();
+  }
+
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    let hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      // Initial installation doesn't require a reload.
+      if (hadController) {
+        updatePending = true;
+        applyPendingUpdate();
+      }
+      hadController = true;
     });
+    const register = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" });
+        const check = () => {
+          if (document.visibilityState === "visible") registration.update().catch(() => {});
+          applyPendingUpdate();
+        };
+        document.addEventListener("visibilitychange", check);
+        window.addEventListener("online", check);
+        window.setInterval(check, 5 * 60 * 1000);
+        check();
+      } catch { /* Offline startup can still use the installed worker. */ }
+    };
+    if (document.readyState === "complete") register();
+    else window.addEventListener("load", register, { once: true });
   }
 
   populateFamousLocations();
   applyTargetFromUrl();
+  try {
+    const draft = JSON.parse(sessionStorage.getItem(updateDraftKey) || "null");
+    sessionStorage.removeItem(updateDraftKey);
+    if (draft) {
+      els.targetInput.value = draft.input;
+      els.famousLocation.value = draft.famous;
+      setTargetSource(draft.source);
+    }
+  } catch { /* Storage may be disabled. */ }
   requestLocation();
   updateTargetState();
 })();
