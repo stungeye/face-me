@@ -12,7 +12,7 @@
   <title>Face Me</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon-192.png" />
-  <link rel="stylesheet" href="./styles.css?v=14" />
+  <link rel="stylesheet" href="./styles.css?v=15" />
 </head>
 <body>
   <main id="setup" class="setup" aria-labelledby="app-title">
@@ -53,22 +53,46 @@
           <span id="target-status" class="status-pill" data-state="neutral">waiting</span>
         </div>
 
-        <label class="sr-only" for="target-input">Their latitude and longitude</label>
-        <textarea
-          id="target-input"
-          rows="2"
-          inputmode="decimal"
-          autocomplete="off"
-          autocapitalize="off"
-          spellcheck="false"
-          aria-describedby="target-hint"
-          aria-errormessage="target-error"
-          aria-invalid="false"
-        ></textarea>
-        <p id="target-hint" class="hint">Enter latitude, longitude in decimal degrees. You can paste directly into the field.</p>
-        <p id="target-error" class="message target-error" role="status" aria-live="polite"></p>
-        <div class="button-row">
-          <button id="clear-target" type="button" class="secondary">Clear</button>
+        <fieldset class="target-source">
+          <legend class="sr-only">Choose how to set their location</legend>
+          <label class="source-option">
+            <input type="radio" name="target-source" value="user" checked />
+            <span>User input</span>
+          </label>
+          <label class="source-option">
+            <input type="radio" name="target-source" value="famous" />
+            <span>Famous location</span>
+          </label>
+        </fieldset>
+
+        <div id="target-user-panel">
+          <label class="sr-only" for="target-input">Their latitude and longitude</label>
+          <textarea
+            id="target-input"
+            rows="2"
+            inputmode="decimal"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            aria-describedby="target-hint"
+            aria-errormessage="target-error"
+            aria-invalid="false"
+          ></textarea>
+          <p id="target-hint" class="hint">Enter latitude, longitude in decimal degrees. You can paste directly into the field.</p>
+          <p id="target-error" class="message target-error" role="status" aria-live="polite"></p>
+          <div class="button-row">
+            <button id="clear-target" type="button" class="secondary">Clear</button>
+          </div>
+        </div>
+
+        <div id="target-famous-panel" hidden>
+          <label class="field-label" for="famous-location">Choose a famous location</label>
+          <div class="select-wrap">
+            <select id="famous-location">
+              <option value="">Select a location…</option>
+            </select>
+          </div>
+          <output id="famous-coordinates" class="famous-coordinates" aria-live="polite"></output>
         </div>
 
         <div id="target-preview" class="target-preview" hidden>
@@ -91,7 +115,7 @@
 
       <p class="pointer-note"><strong>How to point:</strong> the <em>top edge</em> of your phone is the pointer. Hold it flat for nearby targets; tilt it downward for distant ones.</p>
       <p class="privacy-note">Face Me has no coordinate backend or API. Shared links contain latitude and longitude in the URL, which your web host may log.</p>
-      <p class="build-version" aria-label="Build version">Face Me v1.1</p>
+      <p class="build-version" aria-label="Build version">Face Me v1.2</p>
     </section>
   </main>
 
@@ -131,6 +155,6 @@
     </aside>
   </section>
 
-  <script type="module" src="./app.js?v=15"></script>
+  <script type="module" src="./app.js?v=17"></script>
 </body>
 </html>

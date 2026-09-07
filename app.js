@@ -23,6 +23,10 @@ import {
   createFaceSessionBoundary,
   createWakeLockController,
 } from "./lifecycle.js?v=13";
+import {
+  FAMOUS_LOCATIONS,
+  famousLocationById,
+} from "./famous-locations.js?v=2";
 
 (() => {
 
@@ -248,9 +252,14 @@ import {
     refreshLocation: document.querySelector("#refresh-location"),
     copyLocation: document.querySelector("#copy-location"),
     copyLink: document.querySelector("#copy-link"),
+    targetSources: document.querySelectorAll('input[name="target-source"]'),
+    targetUserPanel: document.querySelector("#target-user-panel"),
+    targetFamousPanel: document.querySelector("#target-famous-panel"),
     targetInput: document.querySelector("#target-input"),
     targetError: document.querySelector("#target-error"),
     clearTarget: document.querySelector("#clear-target"),
+    famousLocation: document.querySelector("#famous-location"),
+    famousCoordinates: document.querySelector("#famous-coordinates"),
     targetStatus: document.querySelector("#target-status"),
     targetPreview: document.querySelector("#target-preview"),
     previewDistance: document.querySelector("#preview-distance"),
@@ -344,14 +353,64 @@ import {
     els.targetError.textContent = message;
   }
 
+  function updateTargetInputError() {
+    setTargetError(
+      selectedTargetSource() !== "user" || state.target || !els.targetInput.value.trim()
+        ? ""
+        : "I couldn't read that. Use latitude, longitude — for example: 49.8951, -97.1384"
+    );
+  }
+
+  function selectedTargetSource() {
+    return document.querySelector('input[name="target-source"]:checked')?.value || "user";
+  }
+
+  function selectedTarget() {
+    if (selectedTargetSource() === "famous") {
+      return famousLocationById(els.famousLocation.value);
+    }
+    return parseCoordinates(els.targetInput.value);
+  }
+
+  function setTargetSource(source) {
+    const radio = [...els.targetSources].find(input => input.value === source);
+    if (radio) radio.checked = true;
+    const useFamousLocation = source === "famous";
+    els.targetUserPanel.hidden = useFamousLocation;
+    els.targetFamousPanel.hidden = !useFamousLocation;
+  }
+
+  function populateFamousLocations() {
+    const groups = new Map();
+    for (const location of FAMOUS_LOCATIONS) {
+      let group = groups.get(location.group);
+      if (!group) {
+        group = document.createElement("optgroup");
+        group.label = location.group;
+        groups.set(location.group, group);
+        els.famousLocation.append(group);
+      }
+      const option = document.createElement("option");
+      option.value = location.id;
+      option.textContent = `${location.name} — ${location.country}`;
+      group.append(option);
+    }
+  }
+
   function updateTargetState() {
-    const target = parseCoordinates(els.targetInput.value);
-    const hasInput = Boolean(els.targetInput.value.trim());
+    const source = selectedTargetSource();
+    const target = selectedTarget();
+    const hasInput = source === "famous"
+      ? Boolean(els.famousLocation.value)
+      : Boolean(els.targetInput.value.trim());
     state.target = target;
     els.faceButton.disabled = !(state.current && target);
-    els.targetInput.setAttribute("aria-invalid", String(hasInput && !target));
+    els.targetInput.setAttribute("aria-invalid", String(source === "user" && hasInput && !target));
     els.targetStatus.textContent = target ? "ready" : (hasInput ? "check input" : "waiting");
     els.targetStatus.dataset.state = target ? "good" : (hasInput ? "bad" : "neutral");
+    els.famousCoordinates.textContent = source === "famous" && target
+      ? formatCoordinates(target, 7)
+      : "";
     updateTargetPreview();
   }
 
@@ -604,6 +663,7 @@ import {
   function applyTargetFromUrl() {
     const target = parseCoordinatesFromSearch(window.location.search);
     if (!target) return false;
+    setTargetSource("user");
     els.targetInput.value = formatCoordinates(target);
     updateTargetState();
     return true;
@@ -781,7 +841,7 @@ import {
 
   async function enterFaceMode() {
     if (faceSession.active) return;
-    state.target = parseCoordinates(els.targetInput.value);
+    state.target = selectedTarget();
     if (!state.current || !state.target) {
       setMessage("Set both locations first.");
       return;
@@ -842,7 +902,9 @@ import {
     clearFaceSessionTimers();
     els.faceStage.hidden = true;
     els.setup.hidden = false;
-    const setupFocusTarget = els.faceButton.disabled ? els.targetInput : els.faceButton;
+    const setupFocusTarget = els.faceButton.disabled
+      ? (selectedTargetSource() === "famous" ? els.famousLocation : els.targetInput)
+      : els.faceButton;
     setupFocusTarget.focus({ preventScroll: true });
     state.debug = false;
     els.debugPanel.hidden = true;
@@ -901,9 +963,21 @@ import {
   els.targetInput.addEventListener("input", () => {
     updateTargetState();
     setMessage("");
-    setTargetError(state.target || !els.targetInput.value.trim()
-      ? ""
-      : "I couldn't read that. Use latitude, longitude — for example: 49.8951, -97.1384");
+    updateTargetInputError();
+  });
+
+  for (const input of els.targetSources) {
+    input.addEventListener("change", () => {
+      setTargetSource(input.value);
+      setMessage("");
+      updateTargetState();
+      updateTargetInputError();
+    });
+  }
+
+  els.famousLocation.addEventListener("change", () => {
+    setMessage("");
+    updateTargetState();
   });
 
   els.clearTarget.addEventListener("click", () => {
@@ -949,6 +1023,7 @@ import {
     });
   }
 
+  populateFamousLocations();
   applyTargetFromUrl();
   requestLocation();
   updateTargetState();

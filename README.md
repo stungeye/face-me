@@ -1,4 +1,4 @@
-# Face Me — v1.1
+# Face Me — v1.2
 
 An Android-first PWA that lets two people point directly toward one another using shared latitude/longitude coordinates.
 
@@ -6,13 +6,19 @@ An Android-first PWA that lets two people point directly toward one another usin
 
 1. Face Me gets your current GPS latitude/longitude.
 2. Copy your coordinates or a shareable URL containing them as `?lat=...&lon=...`.
-3. Enter or paste the other person's coordinates. Opening one of the shared URLs fills them automatically.
+3. Enter or paste the other person's coordinates, or choose a famous location. Opening one of the shared URLs fills the manual input automatically.
 4. Tap **FACE ME**.
 5. The screen becomes a black direction view with a 3D arrow.
 6. The **top edge of the phone** is the pointing vector. Rotate and tilt the phone until the arrow aligns with that edge.
 7. Double-tap the black direction screen to show/hide debug information.
 
 The direction is the literal three-dimensional chord between the two WGS84 locations, not a surface-navigation bearing. Long-distance targets therefore point below the horizon and an antipodal target points almost straight down through the Earth.
+
+## v1.2 changes
+
+- Added a **User input / Famous location** choice for the target.
+- Added grouped fixed-coordinate landmarks from around the world, Canada, Manitoba and Winnipeg, including the Kaaba in Mecca.
+- Landmark targets show their exact stored latitude/longitude and use the same direct-through-Earth geometry as manually entered targets.
 
 ## v1.1 changes
 
