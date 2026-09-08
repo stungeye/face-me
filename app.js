@@ -19,16 +19,16 @@ import {
   smoothDirection,
   targetDetails,
   tiltAdjustmentDeg,
-} from "./core.js";
+} from "./core.js?v=1.9.1";
 import {
   createFaceSessionBoundary,
   createWakeLockController,
-} from "./lifecycle.js";
+} from "./lifecycle.js?v=1.9.1";
 import {
   FAMOUS_LOCATIONS,
   famousLocationById,
-} from "./famous-locations.js";
-import "./version.js";
+} from "./famous-locations.js?v=1.9.1";
+import "./version.js?v=1.9.1";
 
 const BUILD_VERSION = globalThis.FACE_ME_VERSION;
 

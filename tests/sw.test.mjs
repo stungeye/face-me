@@ -4,10 +4,13 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
 const source = await readFile(new URL("../sw.js", import.meta.url), "utf8");
-const currentCache = `face-me-v${(await readFile(new URL("../version.js", import.meta.url), "utf8"))
-  .match(/FACE_ME_VERSION = "([^"]+)"/)[1]}`;
+const versionSource = await readFile(new URL("../version.js", import.meta.url), "utf8");
+const versionContext = vm.createContext({});
+vm.runInContext(versionSource, versionContext);
+const currentVersion = versionContext.FACE_ME_VERSION;
+const currentCache = `face-me-v${currentVersion}`;
 const obsoleteCaches = ["face-me-v19", "face-me-v20", "face-me-v21", "face-me-v22"];
-function worker({ offline = false, failInstall = false } = {}) {
+function worker({ offline = false, failInstall = false, failUrls = [] } = {}) {
   const handlers = {}, deleted = [], requests = [], stored = new Map();
   let skipped = false, claimed = false;
   const cache = {
@@ -18,9 +21,11 @@ function worker({ offline = false, failInstall = false } = {}) {
     put: async (request, response) => stored.set(request.url, response),
     match: async request => stored.get(request.url || request),
   };
-  vm.runInNewContext(source, {
-    globalThis: { FACE_ME_VERSION: currentCache.slice("face-me-v".length) },
-    importScripts: () => {},
+  const context = vm.createContext({
+    importScripts: url => {
+      assert.equal(url, `./version.js?v=${currentVersion}`);
+      vm.runInContext(versionSource, context);
+    },
     self: {
       location: { origin: "https://example.com" },
       addEventListener: (name, handler) => { handlers[name] = handler; },
@@ -28,7 +33,7 @@ function worker({ offline = false, failInstall = false } = {}) {
       clients: { claim: async () => { claimed = true; } },
     },
     caches: {
-      open: async () => cache,
+      open: async name => { assert.equal(name, currentCache); return cache; },
       keys: async () => [...obsoleteCaches, currentCache, "other-app"],
       delete: async key => deleted.push(key),
     },
@@ -38,10 +43,11 @@ function worker({ offline = false, failInstall = false } = {}) {
     URL, Response,
     fetch: async (request, options) => {
       requests.push({ request, options });
-      if (offline) throw Error("offline");
+      if (offline || failUrls.includes(request.url)) throw Error("offline");
       return new Response("fresh");
     },
   });
+  vm.runInContext(source, context);
   return {
     deleted, requests, stored,
     get skipped() { return skipped; },
@@ -61,10 +67,23 @@ test("installation bypasses HTTP cache and activates only after assets succeed",
   const sw = worker();
   await sw.dispatch("install");
   assert.ok(sw.requests.every(request => request.cache === "reload"));
+  assert.ok(sw.requests.some(request => request.url === `https://example.com/version.js?v=${currentVersion}`));
   assert.equal(sw.skipped, true);
   const failed = worker({ failInstall: true });
   await assert.rejects(failed.dispatch("install"));
   assert.equal(failed.skipped, false);
+});
+
+test("partial release fetch failures never reuse a previous release asset key", async () => {
+  const newCore = `https://example.com/core.js?v=${currentVersion}`;
+  const sw = worker({ failUrls: [newCore] });
+  // Even if an older tab has populated the active cache, exact keys isolate it.
+  sw.stored.set("https://example.com/core.js?v=1.9", new Response("old core"));
+  const app = await sw.dispatch("fetch", new Request(`https://example.com/app.js?v=${currentVersion}`));
+  assert.equal(await app.text(), "fresh");
+  assert.equal((await sw.dispatch("fetch", new Request(newCore))).type, "error");
+  sw.stored.set(newCore, new Response("current core"));
+  assert.equal(await (await sw.dispatch("fetch", new Request(newCore))).text(), "current core");
 });
 
 test("activation removes only obsolete Face Me caches and claims open clients", async () => {

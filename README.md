@@ -1,4 +1,4 @@
-# Face Me — v1.7
+# Face Me
 
 An Android-first PWA that lets two people point directly toward one another using shared latitude/longitude coordinates.
 
@@ -78,7 +78,8 @@ The app checks for a new service worker on launch, on returning to the app, on r
 
 For the first deployment of this updater, an already-open older app may need one normal close/reopen or reload to pick up the new client code. Clearing site data is unnecessary.
 
-- Update the cache name in `sw.js` and the query versions for every changed cached CSS or JavaScript file in `index.html`, `app.js` and `sw.js`.
+- Edit only the release value in `version.js`, using a new version for every deployment that changes cached code or styles. Run `npm run version:sync` to update the checked-in CSS/JavaScript URLs in HTML, module imports, worker imports and precache entries. Commit and deploy those generated changes along with `version.js`; Netlify still serves this folder directly with no build step.
+- Run `npm run version:check` to verify generated URLs without modifying files (also included in `npm test`). The visible build label, debug report and worker cache name read the same version source. Release query strings keep previous-release cache entries from satisfying new-release asset requests during network failures. They do not make server responses immutable or eliminate all deployment races; deploy the complete release together.
 - Run `npm test`, JavaScript syntax checks and a DOM ID/binding check.
 - Verify that the target starts blank without URL parameters and that a valid shared `?lat=...&lon=...` link fills it.
 - Enter and exit arrow mode repeatedly; confirm focus moves to the exit button and back to setup, and that animation, sensors, GPS watch and wake lock stop on exit.

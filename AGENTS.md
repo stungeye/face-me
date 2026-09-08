@@ -93,7 +93,7 @@ It can be deployed directly to Netlify with `index.html` at the deploy root.
 
 Geolocation/orientation testing requires HTTPS on the phone.
 
-The service worker is intentionally network-first during active development to make redeploys less sticky. When changing cache-sensitive files, update the cache/version identifiers consistently so installed PWAs do not stay on an old build.
+The service worker is intentionally network-first during active development to make redeploys less sticky. When changing cache-sensitive files, edit the sole release value in `version.js` and run `npm run version:sync`. Commit the generated release URLs with the source; `npm test` checks they are synchronized. Deployment remains build-free.
 
 ## Useful physical test coordinates
 
