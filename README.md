@@ -115,3 +115,13 @@ https://example.com/?lat=49.895100&lon=-97.138400
 ```
 
 Face Me does not send coordinates to an app-specific backend/API, but coordinates in query parameters can appear in normal web-host/CDN request logs.
+
+## Browser device architecture
+
+`device-services.js` owns location permissions, refinement, watch renewal and normalized status. `orientation-service.js` owns sensor selection, failover and transforms from ENU into the physical phone frame. `lifecycle.js` owns session generations, browser visibility/page lifecycle, presentation requests and wake locks. The app renders these readings and keeps the geometry in `core.js` unchanged.
+
+Backgrounding stops sensors, GPS, animation and wake lock. Returning to arrow mode requires fresh location and orientation. A stationary GPS watch is renewed with an uncached request at most every 30 seconds; expired fixes and location errors suppress alignment. Unsupported fullscreen, portrait lock and wake lock remain optional. If the screen rotates away from upright portrait, guidance replaces the arrow to preserve the physical top-edge contract.
+
+Setup offers Copy diagnostics after location failure. Reports include location age, accuracy, errors, service transitions and the normalized orientation transform, compass quality and north reference. Apple compass readings are magnetic referenced; near vertical, calibrated relative yaw is usable for at most two seconds before the user must briefly level the phone to reacquire north. This is a conservative browser workaround, not a claim of independently verified compass accuracy.
+
+Node tests use injected browser APIs and captured Pixel data. They cannot validate browser permission UI, hardware compass accuracy, background OS behavior or installed PWA behavior. Use `DEVICE-TESTING.md` for real Android Chrome and iPhone Safari checks before describing cross-browser support as physically validated.

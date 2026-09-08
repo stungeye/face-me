@@ -1,12 +1,11 @@
+import { createOrientationService, transformEarthToPhone } from "./orientation-service.js?v=1.10.0";
+import { createLocationService } from "./device-services.js?v=1.10.0";
 import {
   ALIGNMENT_AXIS,
   angleDegBetween,
   bearingDeg,
   clamp,
   cross,
-  deviceOrientationMatrix,
-  earthToLocalFromRowMajorMatrix,
-  earthToLocalFromSensorMatrix,
   fmt,
   formatCoordinates,
   formatDistance,
@@ -19,16 +18,17 @@ import {
   smoothDirection,
   targetDetails,
   tiltAdjustmentDeg,
-} from "./core.js?v=1.9.1";
+} from "./core.js?v=1.10.0";
 import {
-  createFaceSessionBoundary,
+  createDeviceSession,
+  createBrowserPresentation,
   createWakeLockController,
-} from "./lifecycle.js?v=1.9.1";
+} from "./lifecycle.js?v=1.10.0";
 import {
   FAMOUS_LOCATIONS,
   famousLocationById,
-} from "./famous-locations.js?v=1.9.1";
-import "./version.js?v=1.9.1";
+} from "./famous-locations.js?v=1.10.0";
+import "./version.js?v=1.10.0";
 
 const BUILD_VERSION = globalThis.FACE_ME_VERSION;
 
@@ -270,6 +270,9 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     previewHeading: document.querySelector("#preview-heading"),
     previewTilt: document.querySelector("#preview-tilt"),
     setupMessage: document.querySelector("#setup-message"),
+    copyDiagnostics: document.querySelector("#copy-diagnostics"),
+    portraitGuidance: document.querySelector("#portrait-guidance"),
+    faceLocationWarning: document.querySelector("#face-location-warning"),
     faceButton: document.querySelector("#face-button"),
     faceStage: document.querySelector("#face-stage"),
     exitFace: document.querySelector("#exit-face"),
@@ -323,13 +326,9 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     alpha: null,
     beta: null,
     gamma: null,
-    sensorMatrix: null,
-    genericSensor: null,
-    orientationHandler: null,
-    orientationAbsoluteHandler: null,
     debug: false,
     facing: false,
-    watchId: null,
+    locationTimestamp: null,
     animationId: null,
     lastFrameAt: 0,
     lastUiAt: 0,
@@ -340,16 +339,43 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     lastAlignmentText: "",
     lastAlignmentStatus: "",
     lastAlignmentStatusAt: 0,
-    orientationFallbackTimer: null,
     sensorWarningTimer: null,
     hintTimer: null,
   };
 
-  const faceSession = createFaceSessionBoundary();
+  let orientationPermission = Promise.resolve();
+  const faceSession = createDeviceSession({ document, window,
+    onSetupPause() {
+      const pending = ["acquiring", "refining"].includes(locationService.snapshot.state);
+      locationService.stop();
+      return pending;
+    },
+    onSetupResume() { requestLocation(); },
+    onPause() {
+      stopAnimation(); stopOrientation(); stopLocationWatch(); releaseWakeLock();
+      clearFaceSessionTimers(); resetFaceSessionTelemetry();
+      els.canvas.style.visibility = "hidden";
+    },
+    onResume(session) {
+      state.locationTimestamp = null;
+      resetFaceSessionTelemetry();
+      startLocationWatch(session); startAnimation(); requestWakeLock(session);
+      orientationPermission.then(() => startOrientation(session)).catch(error => {
+        if (faceSession.isCurrent(session)) showOrientationError(error);
+      });
+      scheduleSensorWarning(session);
+    },
+  });
   const wakeLock = createWakeLockController({
     requestLock: () => navigator.wakeLock?.request?.("screen"),
     isSessionCurrent: session => faceSession.isCurrent(session),
   });
+
+  let locationMessage = "";
+  function clearLocationMessage() {
+    if (els.setupMessage.textContent === locationMessage) setMessage("");
+    locationMessage = "";
+  }
 
   function setMessage(message = "") {
     els.setupMessage.textContent = message;
@@ -447,9 +473,19 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     els.targetPreview.hidden = false;
   }
 
+  const locationService = createLocationService({
+    onReading: updateCurrentLocation,
+    onStatus(status) {
+      els.copyDiagnostics.hidden = !status.error;
+      if (status.error) locationError(status.error);
+      else if (status.state === "ready" || status.state === "refining") clearLocationMessage();
+    },
+  });
+
   function updateCurrentLocation(position) {
-    state.current = { lat: position.coords.latitude, lon: position.coords.longitude };
-    state.accuracy = position.coords.accuracy;
+    state.current = { lat: position.lat, lon: position.lon };
+    state.accuracy = position.accuracy;
+    state.locationTimestamp = position.timestamp;
     els.myCoordinates.textContent = formatCoordinates(state.current);
     els.copyLocation.disabled = false;
     els.copyLink.disabled = false;
@@ -461,53 +497,28 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
 
   function locationError(error) {
     const messages = {
-      1: "Location permission was denied.",
-      2: "Your location is unavailable.",
-      3: "Location timed out. Try again.",
+      0: "This browser does not provide geolocation.",
+      1: "Location is blocked. Allow location for this site in your browser and check your phone’s Location Services, then tap Refresh.",
+      2: "Your location is unavailable. Check your phone’s Location Services and try Refresh outdoors or near a window.",
+      3: "Location timed out. Try Refresh outdoors or near a window.",
     };
     setGpsStatus("location error", "bad");
-    setMessage(messages[error.code] || "Could not get your location.");
+    locationMessage = messages[error.code] || "Could not get your location.";
+    setMessage(locationMessage);
   }
 
-  async function requestLocation() {
-    if (!navigator.geolocation) {
-      setGpsStatus("unsupported", "bad");
-      setMessage("This browser does not provide geolocation.");
-      return;
-    }
+  function requestLocation() {
     setGpsStatus("locating…", "working");
     setMessage("");
-    try {
-      const permission = await navigator.permissions?.query?.({ name: "geolocation" });
-      if (permission?.state === "denied") {
-        setGpsStatus("permission denied", "bad");
-        setMessage("Location is blocked for this site. In Chrome, open site controls beside the address, allow Location, then tap Refresh.");
-        return;
-      }
-    } catch {}
-    navigator.geolocation.getCurrentPosition(updateCurrentLocation, locationError, {
-      enableHighAccuracy: true,
-      timeout: 12000,
-      maximumAge: 30000,
-    });
+    locationService.acquire();
   }
 
   function startLocationWatch(session) {
-    if (!navigator.geolocation || state.watchId !== null) return;
-    state.watchId = navigator.geolocation.watchPosition(position => {
-      if (faceSession.isCurrent(session)) updateCurrentLocation(position);
-    }, () => {}, {
-      enableHighAccuracy: true,
-      timeout: 20000,
-      maximumAge: 3000,
-    });
+    if (faceSession.isCurrent(session)) locationService.watch();
   }
 
   function stopLocationWatch() {
-    if (state.watchId !== null && navigator.geolocation) {
-      navigator.geolocation.clearWatch(state.watchId);
-      state.watchId = null;
-    }
+    locationService.stop();
   }
 
   function recalculateTargetVector() {
@@ -538,142 +549,52 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     els.sensorWarning.hidden = true;
   }
 
+  const orientationService = createOrientationService({
+    onReading(reading) {
+      if (!faceSession.active) return;
+      state.orientationReading = reading;
+      state.sensorSource = reading.source;
+      state.sensorAbsolute = true;
+      state.sensorError = "";
+      [state.alpha, state.beta, state.gamma] = reading.angles;
+      updateDirectionFromSensorState();
+    },
+    onStatus(snapshot) {
+      if (!faceSession.active) return;
+      state.sensorSource = snapshot.source;
+      state.sensorError = snapshot.error;
+      if (!snapshot.reading) {
+        state.orientationReading = null;
+        state.sensorAbsolute = false;
+        state.rawLocalDirection = null;
+        state.localUp = null;
+        state.lastSensorReadingAt = 0;
+        if (snapshot.error) {
+          els.sensorWarning.textContent = snapshot.error;
+          els.sensorWarning.hidden = false;
+        }
+      }
+    },
+  });
+
   function updateDirectionFromSensorState() {
-    if (!state.targetUnitEnu || !state.sensorAbsolute) return;
-    if (state.sensorMatrix) {
-      state.localUp = earthToLocalFromSensorMatrix(state.sensorMatrix, [0, 0, 1]);
-      setRawLocalDirection(earthToLocalFromSensorMatrix(state.sensorMatrix, state.targetUnitEnu));
-      return;
-    }
-    if ([state.alpha, state.beta, state.gamma].every(Number.isFinite)) {
-      const matrix = deviceOrientationMatrix(state.alpha, state.beta, state.gamma);
-      state.localUp = earthToLocalFromRowMajorMatrix(matrix, [0, 0, 1]);
-      setRawLocalDirection(earthToLocalFromRowMajorMatrix(matrix, state.targetUnitEnu));
-    }
-  }
-
-  function onDeviceOrientation(event, source, session) {
-    if (!faceSession.isCurrent(session)) return;
-    if (![event.alpha, event.beta, event.gamma].every(Number.isFinite)) return;
-    state.sensorSource = source;
-    state.sensorAbsolute = event.absolute === true || source === "deviceorientationabsolute";
-    state.alpha = event.alpha;
-    state.beta = event.beta;
-    state.gamma = event.gamma;
-    state.sensorMatrix = null;
-    if (!state.sensorAbsolute) {
-      // Relative angles have no north reference, so they cannot locate the target.
-      state.rawLocalDirection = null;
-      state.localUp = null;
-      state.displayTilt = null;
-      state.lastSensorReadingAt = 0;
-      return;
-    }
-    updateDirectionFromSensorState();
-  }
-
-  function clearOrientationFallbackTimer() {
-    if (state.orientationFallbackTimer !== null) {
-      clearTimeout(state.orientationFallbackTimer);
-      state.orientationFallbackTimer = null;
-    }
-  }
-
-  function stopGenericOrientationSensor() {
-    if (!state.genericSensor) return;
-    try { state.genericSensor.stop(); } catch {}
-    state.genericSensor = null;
-  }
-
-  function detachOrientationEventFallback() {
-    if (state.orientationAbsoluteHandler) {
-      window.removeEventListener("deviceorientationabsolute", state.orientationAbsoluteHandler, true);
-      state.orientationAbsoluteHandler = null;
-    }
-    if (state.orientationHandler) {
-      window.removeEventListener("deviceorientation", state.orientationHandler, true);
-      state.orientationHandler = null;
-    }
+    if (!state.targetUnitEnu || !state.orientationReading || !state.sensorAbsolute) return;
+    state.localUp = transformEarthToPhone(state.orientationReading.transform, [0, 0, 1]);
+    setRawLocalDirection(transformEarthToPhone(state.orientationReading.transform, state.targetUnitEnu));
+    state.lastSensorReadingAt = state.orientationReading.timestamp;
   }
 
   function startOrientation(session) {
-    if (!faceSession.isCurrent(session)) return;
-    stopOrientation();
-    state.sensorError = "";
-    state.sensorSource = "starting";
-    state.lastSensorReadingAt = 0;
-
-    if ("AbsoluteOrientationSensor" in window) {
-      try {
-        const sensor = new AbsoluteOrientationSensor({ frequency: 60, referenceFrame: "screen" });
-        state.genericSensor = sensor;
-        sensor.addEventListener("reading", () => {
-          if (!faceSession.isCurrent(session) || state.genericSensor !== sensor) return;
-          try {
-            const matrix = new Float32Array(16);
-            sensor.populateMatrix(matrix);
-            clearOrientationFallbackTimer();
-            detachOrientationEventFallback();
-            state.sensorMatrix = matrix;
-            state.sensorSource = "AbsoluteOrientationSensor(screen)";
-            state.sensorAbsolute = true;
-            updateDirectionFromSensorState();
-          } catch (error) {
-            state.sensorError = error?.message || String(error);
-          }
-        });
-        sensor.addEventListener("error", event => {
-          if (!faceSession.isCurrent(session) || state.genericSensor !== sensor) return;
-          state.sensorError = `${event.error?.name || "SensorError"}: ${event.error?.message || "unavailable"}`;
-          attachOrientationEventFallback(session);
-        });
-        sensor.start();
-        const fallbackTimer = window.setTimeout(() => {
-          if (state.orientationFallbackTimer === fallbackTimer) {
-            state.orientationFallbackTimer = null;
-          }
-          if (faceSession.isCurrent(session) && state.genericSensor === sensor && !state.lastSensorReadingAt) {
-            attachOrientationEventFallback(session, { keepGenericSensor: true });
-          }
-        }, 700);
-        state.orientationFallbackTimer = fallbackTimer;
-        return;
-      } catch (error) {
-        state.sensorError = `${error?.name || "SensorError"}: ${error?.message || "unavailable"}`;
-      }
-    }
-    attachOrientationEventFallback(session);
-  }
-
-  function attachOrientationEventFallback(session, { keepGenericSensor = false } = {}) {
-    if (!faceSession.isCurrent(session)) return;
-    clearOrientationFallbackTimer();
-    // A startup fallback may bridge a slow first generic-sensor reading. Sensor errors make a full handoff.
-    if (!keepGenericSensor) stopGenericOrientationSensor();
-    state.sensorMatrix = null;
-    if (state.orientationHandler || state.orientationAbsoluteHandler) return;
-    state.orientationAbsoluteHandler = event => onDeviceOrientation(event, "deviceorientationabsolute", session);
-    state.orientationHandler = event => {
-      if (state.sensorSource !== "deviceorientationabsolute") {
-        onDeviceOrientation(event, "deviceorientation", session);
-      }
-    };
-    window.addEventListener("deviceorientationabsolute", state.orientationAbsoluteHandler, true);
-    window.addEventListener("deviceorientation", state.orientationHandler, true);
+    if (faceSession.isCurrent(session)) orientationService.start();
   }
 
   function stopOrientation() {
-    clearOrientationFallbackTimer();
-    stopGenericOrientationSensor();
-    detachOrientationEventFallback();
-    state.sensorMatrix = null;
+    orientationService.stop();
+    state.orientationReading = null;
   }
 
-  async function requestOrientationPermission() {
-    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-      const result = await DeviceOrientationEvent.requestPermission(true);
-      if (result !== "granted") throw new Error("Orientation permission was denied.");
-    }
+  function requestOrientationPermission() {
+    return orientationService.requestPermission();
   }
 
   function requestWakeLock(session) {
@@ -813,12 +734,8 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     const enu = state.targetUnitEnu;
     const local = state.rawLocalDirection;
     const targetDescription = selectedTargetDescription();
-    const orientationMatrix = state.sensorMatrix
-      ? Array.from(state.sensorMatrix)
-      : ([state.alpha, state.beta, state.gamma].every(Number.isFinite)
-        ? deviceOrientationMatrix(state.alpha, state.beta, state.gamma)
-        : null);
-    const orientationKind = state.sensorMatrix ? "sensor 4×4, column-major" : "event 3×3, row-major";
+    const orientationMatrix = state.orientationReading?.transform?.flat();
+    const orientationKind = "Earth ENU to physical phone, columns";
 
     return [
       "FACE ME POINTING CHECK",
@@ -831,6 +748,8 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
       `Live expected target tilt: ${enu ? `${fmt(inclinationDeg(enu), 3)}°` : "—"}`,
       `Your GPS: ${state.current ? formatCoordinates(state.current, 7) : "—"}`,
       `GPS accuracy: ${Number.isFinite(state.accuracy) ? `±${fmt(state.accuracy, 1)} m` : "—"}`,
+      `GPS age: ${Number.isFinite(state.locationTimestamp) ? `${Math.max(0, Math.round((Date.now() - state.locationTimestamp) / 1000))} s` : "—"}`,
+      `GPS service: ${locationService.snapshot.state}; permission: ${locationService.snapshot.permission}; error: ${locationService.snapshot.error?.message || "none"}`,
       `Target GPS: ${state.target ? formatCoordinates(state.target, 7) : "—"}`,
       `Surface distance: ${Number.isFinite(state.surfaceDistanceM) ? `${fmt(state.surfaceDistanceM, 1)} m` : "—"}`,
       `Direct chord: ${Number.isFinite(state.chordDistanceM) ? `${fmt(state.chordDistanceM, 1)} m` : "—"}`,
@@ -845,6 +764,11 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
       "",
       "SENSOR SNAPSHOT",
       `Sensor path: ${state.sensorSource}`,
+      `North reference: ${state.orientationReading?.northReference || "unknown"}`,
+      `Orientation quality: ${state.orientationReading?.quality || "unavailable"}`,
+      `Compass accuracy: ${state.orientationReading?.accuracy ?? "unreported"} degrees`,
+      `Location transitions: ${JSON.stringify(locationService.snapshot.transitions)}`,
+      `Orientation transitions: ${JSON.stringify(orientationService.snapshot.transitions)}`,
       `Sensor says absolute: ${state.sensorAbsolute ? "yes" : "no / uncertain"}`,
       `Sensor age: ${state.lastSensorReadingAt ? `${Math.round(now - state.lastSensorReadingAt)} ms` : "—"}`,
       `Sensor error: ${state.sensorError || rendererError || "—"}`,
@@ -869,7 +793,17 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     const dt = state.lastFrameAt ? Math.min(50, now - state.lastFrameAt) : 16.7;
     state.lastFrameAt = now;
 
-    const directionAvailable = hasFreshOrientation(now);
+    const locationAvailable = Boolean(state.locationTimestamp && Date.now() - state.locationTimestamp <= 30000
+      && !locationService.snapshot.error);
+    const landscape = Math.abs(screen.orientation?.angle ?? window.orientation ?? 0) % 360 !== 0;
+    els.portraitGuidance.hidden = !landscape;
+    els.faceLocationWarning.hidden = locationAvailable || landscape;
+    if (!locationAvailable || landscape) els.sensorWarning.hidden = true;
+    else if (!hasFreshOrientation(now) && state.sensorError) {
+      if (els.sensorWarning.textContent !== state.sensorError) els.sensorWarning.textContent = state.sensorError;
+      els.sensorWarning.hidden = false;
+    }
+    const directionAvailable = locationAvailable && !landscape && hasFreshOrientation(now);
     const visibility = directionAvailable ? "visible" : "hidden";
     const availabilityChanged = els.canvas.style.visibility !== visibility;
     if (availabilityChanged) els.canvas.style.visibility = visibility;
@@ -888,7 +822,7 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
       if (availabilityChanged || state.lastAlignmentStatus !== "acquiring" || now - state.lastUiAt >= 90) {
         state.lastUiAt = now;
         state.facing = false;
-        state.lastAlignmentText = "acquiring direction…";
+        state.lastAlignmentText = !locationAvailable ? "acquiring location…" : landscape ? "hold phone upright" : "acquiring direction…";
         els.alignmentText.textContent = state.lastAlignmentText;
         els.alignment.classList.remove("is-close", "is-facing");
         els.faceStage.classList.remove("is-facing");
@@ -897,7 +831,7 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
         els.tiltCue.textContent = "Waiting";
         els.tiltLevel.setAttribute("aria-label", "Top edge tilt: waiting for sensor");
         setAccessibleAlignmentStatus("acquiring", now, true);
-        if (state.rawLocalDirection || (state.sensorSource === "deviceorientation" && !state.sensorAbsolute)) {
+        if (locationAvailable && !landscape && (state.rawLocalDirection || (state.sensorSource === "deviceorientation" && !state.sensorAbsolute))) {
           els.sensorWarning.hidden = false;
         }
       }
@@ -921,7 +855,6 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
   }
 
   function clearFaceSessionTimers() {
-    clearOrientationFallbackTimer();
     clearTimeout(state.sensorWarningTimer);
     clearTimeout(state.hintTimer);
     state.sensorWarningTimer = null;
@@ -943,7 +876,7 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     state.alpha = null;
     state.beta = null;
     state.gamma = null;
-    state.sensorMatrix = null;
+    state.orientationReading = null;
     state.lastAlignmentText = "";
     state.lastAlignmentStatus = "";
     state.lastAlignmentStatusAt = 0;
@@ -963,27 +896,16 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     }, 2600);
   }
 
-  async function requestFullscreenForSession(session) {
-    try {
-      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
-        await document.documentElement.requestFullscreen({ navigationUI: "hide" });
-      }
-    } catch {}
+  const presentation = createBrowserPresentation({ document, screen,
+    isCurrent: session => faceSession.isCurrent(session), isActive: () => faceSession.active,
+  });
 
-    // A newer active session can adopt the same global browser presentation state.
-    if (!faceSession.isCurrent(session) && !faceSession.active && document.fullscreenElement) {
-      try { await document.exitFullscreen(); } catch {}
-    }
-  }
-
-  async function lockOrientationForSession(session) {
-    try {
-      if (screen.orientation?.lock) await screen.orientation.lock("portrait");
-    } catch {}
-
-    if (!faceSession.isCurrent(session) && !faceSession.active) {
-      try { screen.orientation?.unlock?.(); } catch {}
-    }
+  function showOrientationError(error) {
+    if (!faceSession.active) return;
+    state.sensorError = error?.message || String(error);
+    state.sensorSource = "permission denied";
+    els.sensorWarning.textContent = state.sensorError;
+    els.sensorWarning.hidden = false;
   }
 
   async function enterFaceMode() {
@@ -1008,11 +930,14 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     renderer?.resize?.();
 
     // Do the gesture-gated browser UI requests immediately while user activation is fresh.
-    const fullscreenPromise = requestFullscreenForSession(session);
-    const orientationLockPromise = lockOrientationForSession(session);
+    const permissionPromise = requestOrientationPermission();
+    orientationPermission = permissionPromise;
+    const fullscreenPromise = presentation.fullscreen(session);
+    const orientationLockPromise = presentation.portrait(session);
     els.exitFace.focus({ preventScroll: true });
     setAccessibleAlignmentStatus("acquiring", performance.now(), true);
 
+    state.locationTimestamp = null;
     startLocationWatch(session);
     startAnimation();
     scheduleSensorWarning(session);
@@ -1026,14 +951,15 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     }, 4200);
 
     try {
-      await requestOrientationPermission();
+      await permissionPromise;
       if (!faceSession.isCurrent(session)) return;
       startOrientation(session);
     } catch (error) {
       if (!faceSession.isCurrent(session)) return;
       state.sensorError = error?.message || String(error);
       state.sensorSource = "permission denied";
-      attachOrientationEventFallback(session);
+      els.sensorWarning.textContent = state.sensorError;
+      els.sensorWarning.hidden = false;
     }
 
     await Promise.allSettled([fullscreenPromise, orientationLockPromise]);
@@ -1061,8 +987,7 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     els.alignmentStatus.textContent = "";
     state.lastAlignmentStatus = "";
     state.lastAlignmentStatusAt = 0;
-    try { screen.orientation?.unlock?.(); } catch {}
-    try { if (document.fullscreenElement) await document.exitFullscreen(); } catch {}
+    await presentation.exit();
     applyPendingUpdate();
   }
 
@@ -1106,6 +1031,13 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
     } catch {
       setMessage("Could not copy the link automatically.");
     }
+  });
+
+  els.copyDiagnostics.addEventListener("click", async () => {
+    try {
+      await copyText(checkingDetails());
+      momentaryButtonLabel(els.copyDiagnostics, "Copied", "Copy diagnostics");
+    } catch { momentaryButtonLabel(els.copyDiagnostics, "Could not copy", "Copy diagnostics"); }
   });
 
   els.copyCheckingDetails.addEventListener("click", async event => {
@@ -1175,12 +1107,6 @@ const BUILD_VERSION = globalThis.FACE_ME_VERSION;
 
   window.addEventListener("keydown", event => {
     if (event.key === "Escape" && faceSession.active) exitFaceMode();
-  });
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && faceSession.active) {
-      requestWakeLock(faceSession.generation);
-    }
   });
 
   const updateDraftKey = "face-me-update-draft";

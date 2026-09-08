@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import * as core from "../core.js";
+import { normalizeOrientationEvent, transformEarthToPhone } from "../orientation-service.js";
 
 const source = await readFile(new URL("../app.js", import.meta.url), "utf8");
 // Run the production event/animation functions with browser surfaces replaced.
@@ -28,9 +29,10 @@ export function sensorHarness() {
     };
   };
   const els = Object.fromEntries([
-    "canvas", "sensorWarning", "alignmentText", "alignment", "faceStage", "tiltLevel", "tiltCue", "alignmentStatus",
+    "faceLocationWarning", "portraitGuidance", "canvas", "sensorWarning", "alignmentText", "alignment", "faceStage", "tiltLevel", "tiltCue", "alignmentStatus",
   ].map(name => [name, element()]));
   const state = {
+    locationTimestamp: Date.now(),
     targetUnitEnu: [0, 1, 0], rawLocalDirection: null, sensorAbsolute: false,
     displayDirection: [0, 1, 0], localUp: null, displayTilt: null,
     lastSensorReadingAt: 0, lastFrameAt: 0, lastUiAt: 0, lastVibrateAt: 0,
@@ -38,17 +40,26 @@ export function sensorHarness() {
   const renders = [];
   const vibrations = [];
   const context = vm.createContext({
-    ...core, state, els, performance: { now: () => now },
+    screen: { orientation: { angle: 0 } }, window: {}, locationService: { snapshot: { error: null } },
+    ...core, transformEarthToPhone, state, els, performance: { now: () => now },
     faceSession: { active: true, isCurrent: session => session === 1 },
     renderer: { render(...args) { renders.push(args); } }, requestAnimationFrame: () => 1,
     updateDebugPanel() {}, navigator: { vibrate: value => vibrations.push(value) },
     ALIGNMENT_STATUS_TEXT: { acquiring: "Acquiring direction.", off: "Off", close: "Close", facing: "Facing target." },
   });
-  const names = ["setRawLocalDirection", "updateDirectionFromSensorState", "onDeviceOrientation", "setAccessibleAlignmentStatus", "hasFreshOrientation", "updateAlignmentUi", "frame"];
+  const names = ["setRawLocalDirection", "updateDirectionFromSensorState", "setAccessibleAlignmentStatus", "hasFreshOrientation", "updateAlignmentUi", "frame"];
   vm.runInContext(names.map(functionSource).join("\n"), context);
   return {
     state, els, renders, vibrations,
-    reading(event, source = "deviceorientation") { context.onDeviceOrientation(event, source, 1); },
+    screen: context.screen, locationService: context.locationService,
+    reading(event, source = "deviceorientation") {
+      const reading = normalizeOrientationEvent(event, source, now);
+      state.orientationReading = reading;
+      state.sensorSource = source;
+      state.sensorAbsolute = Boolean(reading);
+      if (reading) context.updateDirectionFromSensorState();
+      else { state.rawLocalDirection = null; state.localUp = null; state.lastSensorReadingAt = 0; }
+    },
     frame(time = now) { now = time; context.frame(time); },
   };
 }
@@ -126,4 +137,82 @@ test("initial acquisition keeps the arrow hidden until valid telemetry arrives",
   assert.equal(app.els.canvas.style.visibility, "hidden");
   assert.equal(app.els.alignmentStatus.textContent, "Acquiring direction.");
   assert.equal(app.vibrations.length, 0);
+});
+
+
+test("missing or expired GPS prevents stale alignment and fresh GPS recovers", () => {
+
+  const app = sensorHarness();
+
+  app.reading({alpha:0,beta:0,gamma:0,absolute:true}); app.frame();
+
+  assert.equal(app.state.facing,true);
+
+  app.state.locationTimestamp = null; app.frame(200);
+
+  assert.equal(app.state.facing,false);
+
+  assert.equal(app.els.canvas.style.visibility,"hidden");
+
+  assert.equal(app.els.alignmentText.textContent,"acquiring location\u2026");
+
+  app.state.locationTimestamp = Date.now()-31000; app.frame(300);
+
+  assert.equal(app.state.facing,false);
+
+  app.state.locationTimestamp = Date.now(); app.frame(400);
+
+  assert.equal(app.state.facing,true);
+
+});
+
+
+test("location failure diagnostics remain available without GPS or orientation", () => {
+  const context=vm.createContext({
+    performance:{now:()=>100},state:{sensorSource:"waiting"}, BUILD_VERSION:"test",
+    selectedTargetDescription:()=>({name:"User input",nominalHeading:null}),selectedPointingMode:()=>"surface",
+    locationService:{snapshot:{state:"error",permission:"denied",error:{message:"Location blocked"},transitions:[]}},
+    orientationService:{snapshot:{transitions:[]}},screen:{},navigator:{userAgent:"test browser"},rendererType:"Canvas",rendererError:"",
+    ...core,
+  });
+  vm.runInContext(["formatVector","checkingDetails"].map(functionSource).join("\n"),context);
+  const details=context.checkingDetails();
+  assert.match(details,/GPS service: error; permission: denied; error: Location blocked/);
+  assert.match(details,/Orientation quality: unavailable/);
+  assert.match(details,/Orientation matrix \(Earth ENU to physical phone, columns\)/);
+});
+
+test("location recovery clears only the location-owned setup message", () => {
+  const els={setupMessage:{textContent:"GPS failed"}};
+  const context=vm.createContext({els});
+  vm.runInContext('let locationMessage="GPS failed";'+["setMessage","clearLocationMessage"].map(functionSource).join("\n"),context);
+  context.clearLocationMessage();assert.equal(els.setupMessage.textContent,"");
+  vm.runInContext('locationMessage="GPS failed";',context);
+  els.setupMessage.textContent="Could not copy link";context.clearLocationMessage();
+  assert.equal(els.setupMessage.textContent,"Could not copy link");
+});
+
+
+
+test("location errors and non-upright screen rotations suppress alignment with specific guidance", () => {
+  const app=sensorHarness();app.reading({alpha:0,beta:0,gamma:0,absolute:true});app.frame();
+  app.locationService.snapshot.error={code:2};app.frame(200);
+  assert.equal(app.state.facing,false);assert.equal(app.els.faceLocationWarning.hidden,false);
+  app.locationService.snapshot.error=null;
+  for(const angle of [90,180,270]) {
+    app.screen.orientation.angle=angle;app.frame(300+angle);
+    assert.equal(app.state.facing,false);assert.equal(app.els.portraitGuidance.hidden,false);
+    assert.equal(app.els.canvas.style.visibility,"hidden");
+  }
+  app.screen.orientation.angle=0;app.frame(700);assert.equal(app.state.facing,true);
+});
+
+
+test("permission error becomes visible after GPS recovery without another sensor event", () => {
+  const app=sensorHarness();app.state.locationTimestamp=null;
+  app.state.sensorError="Motion permission denied";app.frame();
+  assert.equal(app.els.sensorWarning.hidden,true);
+  app.state.locationTimestamp=Date.now();app.frame(200);
+  assert.equal(app.els.sensorWarning.hidden,false);
+  assert.equal(app.els.sensorWarning.textContent,"Motion permission denied");
 });

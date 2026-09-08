@@ -165,3 +165,36 @@ test("overlapping requests cannot let an old session replace a new lock", async 
   assert.equal(await controller.acquire(newSession), newLock);
   assert.equal(requestCount, 2);
 });
+import { createDeviceSession, createBrowserPresentation } from "../lifecycle.js";
+
+test("browser suspension invalidates callbacks and resumes once with a fresh session", () => {
+  const listeners = {};
+  const document = { visibilityState: "visible", addEventListener(n,f) { listeners[n]=f; } };
+  const window = { addEventListener(n,f) { listeners[n]=f; } };
+  let pauses=0; const resumed=[];
+  const session=createDeviceSession({document,window,onPause:()=>pauses++,onResume:t=>resumed.push(t)});
+  const first=session.begin();
+  document.visibilityState="hidden"; listeners.visibilitychange(); listeners.pagehide();
+  assert.equal(pauses,1); assert.equal(session.active,true); assert.equal(session.isCurrent(first),false);
+  listeners.pageshow(); assert.equal(resumed.length,0);
+  document.visibilityState="visible"; listeners.visibilitychange(); listeners.pageshow();
+  assert.equal(resumed.length,1); assert.equal(session.isCurrent(resumed[0]),true);
+  session.invalidate(); listeners.pagehide(); listeners.pageshow(); assert.equal(resumed.length,1);
+});
+
+test("late fullscreen completion after exit releases browser presentation", async () => {
+  let finish, exits=0, unlocks=0;
+  const document={fullscreenElement:null,documentElement:{requestFullscreen:()=>new Promise(r=>finish=r)},exitFullscreen:async()=>{exits++;document.fullscreenElement=null;}};
+  const presentation=createBrowserPresentation({document,screen:{orientation:{unlock:()=>unlocks++}},isCurrent:()=>false,isActive:()=>false});
+  const pending=presentation.fullscreen(1); document.fullscreenElement={}; finish(); await pending;
+  assert.equal(exits,1); assert.equal(unlocks,1);
+});
+
+test("setup acquisition pauses in background and resumes only if pending", () => {
+  const listeners={};let starts=0,stops=0;
+  const document={visibilityState:"visible",addEventListener:(n,f)=>listeners[n]=f};
+  createDeviceSession({document,window:{addEventListener:(n,f)=>listeners[n]=f},onPause(){},onResume(){},onSetupPause:()=>{stops++;return stops===1;},onSetupResume:()=>starts++});
+  document.visibilityState="hidden";listeners.visibilitychange();listeners.pagehide();
+  document.visibilityState="visible";listeners.pageshow();listeners.visibilitychange();
+  assert.equal(starts,1);
+});

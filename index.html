@@ -12,7 +12,7 @@
   <title>Face Me</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icons/icon-192.png" />
-  <link rel="stylesheet" href="./styles.css?v=1.9.1" />
+  <link rel="stylesheet" href="./styles.css?v=1.10.0" />
 </head>
 <body>
   <main id="setup" class="setup" aria-labelledby="app-title">
@@ -120,6 +120,7 @@
       </div>
       <p id="mode-hint" class="hint">Follow the initial great-circle heading along Earth's surface. The arrow stays horizontal.</p>
 
+      <button id="copy-diagnostics" type="button" hidden>Copy diagnostics</button>
       <p id="setup-message" class="message" role="status" aria-live="polite"></p>
       <button id="face-button" type="button" class="primary" disabled>
         <span>FACE ME</span>
@@ -169,6 +170,8 @@
 
     <div id="face-hint" class="face-hint">Rotate and tilt the phone until the arrow points straight toward the top edge.</div>
 
+    <p id="face-location-warning" class="sensor-warning" hidden>Acquiring a fresh location. If it does not recover, exit and tap Refresh to check location access.</p>
+    <p id="portrait-guidance" class="sensor-warning" hidden>Hold your phone upright in portrait. Point its physical top edge toward the arrow.</p>
     <div id="sensor-warning" class="sensor-warning" hidden role="status">
       Absolute direction is unavailable. Try moving the phone in a figure-eight, then return and try again.
     </div>
@@ -180,6 +183,6 @@
     </aside>
   </section>
 
-  <script type="module" src="./app.js?v=1.9.1"></script>
+  <script type="module" src="./app.js?v=1.10.0"></script>
 </body>
 </html>

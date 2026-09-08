@@ -99,3 +99,48 @@ export function createWakeLockController({ requestLock, isSessionCurrent }) {
 
   return Object.freeze({ acquire, release });
 }
+export function createDeviceSession({ document, window, onPause, onResume, onSetupPause = () => false, onSetupResume = () => {} }) {
+  const boundary = createFaceSessionBoundary();
+  let engaged = false;
+  let paused = false;
+  let setupPending = false;
+  function pause() {
+    if (!engaged) { setupPending = onSetupPause() || setupPending; return; }
+    if (paused) return;
+    paused = true;
+    boundary.invalidate();
+    onPause();
+  }
+  function resume() {
+    if (document.visibilityState !== "visible") return;
+    if (!engaged) { if (setupPending) { setupPending = false; onSetupResume(); } return; }
+    if (!paused) return;
+    paused = false;
+    onResume(boundary.begin());
+  }
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" ? resume() : pause());
+  window.addEventListener("pagehide", pause);
+  window.addEventListener("pageshow", resume);
+  return Object.freeze({
+    begin() { engaged = true; paused = false; return boundary.begin(); },
+    invalidate() { engaged = false; paused = false; return boundary.invalidate(); },
+    isCurrent: token => boundary.isCurrent(token),
+    get active() { return engaged; },
+    get generation() { return boundary.generation; },
+  });
+}
+export function createBrowserPresentation({ document, screen, isCurrent, isActive }) {
+  async function fullscreen(session) {
+    try { if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.({ navigationUI: "hide" }); } catch {}
+    if (!isCurrent(session) && !isActive()) await exit();
+  }
+  async function portrait(session) {
+    try { await screen.orientation?.lock?.("portrait"); } catch {}
+    if (!isCurrent(session) && !isActive()) { try { screen.orientation?.unlock?.(); } catch {} }
+  }
+  async function exit() {
+    try { screen.orientation?.unlock?.(); } catch {}
+    try { if (document.fullscreenElement) await document.exitFullscreen(); } catch {}
+  }
+  return { fullscreen, portrait, exit };
+}
